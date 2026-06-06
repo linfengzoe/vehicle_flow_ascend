@@ -57,3 +57,42 @@ def test_dry_run_does_not_import_heavy_runtime_modules(capsys) -> None:
 
     assert "torch" not in sys.modules
     assert "acl" not in sys.modules
+
+
+def test_normal_run_creates_detector_and_runs_app(monkeypatch, capsys) -> None:
+    from vehicle_flow_ascend import app
+    from vehicle_flow_ascend.detectors import base
+
+    calls = {}
+
+    class FakeDetector:
+        pass
+
+    def fake_create_detector(config):
+        calls["backend"] = config.backend
+        calls["source"] = config.source.path
+        return FakeDetector()
+
+    def fake_run_app(config, detector):
+        calls["detector"] = detector
+        calls["max_frames"] = config.max_frames
+        return {"total": 3, "car": 2, "truck": 1}
+
+    monkeypatch.setattr(base, "create_detector", fake_create_detector)
+    monkeypatch.setattr(app, "run_app", fake_run_app)
+
+    exit_code = main([
+        "--config",
+        str(PROJECT_ROOT / "configs" / "pc_demo.yaml"),
+        "--source",
+        "data/demo.mp4",
+        "--max-frames",
+        "5",
+    ])
+
+    assert exit_code == 0
+    assert calls["backend"] == "torch_yolov5"
+    assert calls["source"] == "data/demo.mp4"
+    assert calls["max_frames"] == 5
+    assert isinstance(calls["detector"], FakeDetector)
+    assert json.loads(capsys.readouterr().out) == {"total": 3, "car": 2, "truck": 1}

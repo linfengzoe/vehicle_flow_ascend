@@ -35,8 +35,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(config.to_dict(), indent=2, ensure_ascii=False))
         return 0
 
-    parser.error("only --dry-run is implemented in Task 1")
-    return 2
+    from vehicle_flow_ascend.app import run_app
+    from vehicle_flow_ascend.detectors.base import create_detector
+
+    detector = create_detector(config)
+    counts = run_app(config, detector)
+    print(json.dumps(counts, indent=2, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":

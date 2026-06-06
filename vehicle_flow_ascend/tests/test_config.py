@@ -19,6 +19,7 @@ def test_load_pc_demo_yaml() -> None:
     assert config.source == SourceConfig(path="data/pc_demo.mp4")
     assert config.backend == "torch_yolov5"
     assert config.model_path == "models/yolov5n.pt"
+    assert config.yolov5_repo_path == "third_party/yolov5"
     assert config.image_size == 640
     assert config.confidence_threshold == pytest.approx(0.35)
     assert config.iou_threshold == pytest.approx(0.45)
@@ -35,6 +36,7 @@ def test_defaults_from_empty_mapping() -> None:
     assert config.source == SourceConfig()
     assert config.backend == "torch_yolov5"
     assert config.model_path is None
+    assert config.yolov5_repo_path is None
     assert config.image_size == 640
     assert config.confidence_threshold == pytest.approx(0.35)
     assert config.iou_threshold == pytest.approx(0.45)

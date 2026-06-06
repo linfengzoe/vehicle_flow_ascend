@@ -1,6 +1,7 @@
 source: data/pc_demo.mp4
 backend: torch_yolov5
 model_path: models/yolov5n.pt
+yolov5_repo_path: third_party/yolov5
 image_size: 640
 confidence_threshold: 0.35
 iou_threshold: 0.45
