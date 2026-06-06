@@ -19,6 +19,8 @@ def create_detector(config: VehicleFlowConfig) -> Detector:
         return TorchYoloV5Detector(config)
 
     if config.backend == "ascend_om":
-        raise RuntimeError("ascend_om backend will be available after Task 8 deployment support")
+        from vehicle_flow_ascend.detectors.ascend_om import AscendOmDetector
+
+        return AscendOmDetector(config)
 
     raise ValueError(f"unsupported detector backend: {config.backend}")

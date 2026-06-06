@@ -68,6 +68,7 @@ class VehicleFlowConfig:
     backend: str = "torch_yolov5"
     model_path: str | None = None
     yolov5_repo_path: str | None = None
+    soc_version: str | None = None
     image_size: int = 640
     confidence_threshold: float = 0.35
     iou_threshold: float = 0.45
@@ -84,6 +85,7 @@ class VehicleFlowConfig:
             backend=str(data.get("backend", cls.backend)),
             model_path=_optional_str(data.get("model_path")),
             yolov5_repo_path=_optional_str(data.get("yolov5_repo_path")),
+            soc_version=_optional_str(data.get("soc_version")),
             image_size=int(data.get("image_size", cls.image_size)),
             confidence_threshold=float(
                 data.get("confidence_threshold", cls.confidence_threshold)

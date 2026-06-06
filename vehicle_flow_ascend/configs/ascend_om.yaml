@@ -1,6 +1,7 @@
-source: 0
+source: data/demo.mp4
 backend: ascend_om
-model_path: models/yolov8n.om
+model_path: models/yolov5n.om
+soc_version: Ascend310B4
 image_size: 640
 confidence_threshold: 0.35
 iou_threshold: 0.45
