@@ -1,6 +1,13 @@
 # Vehicle Flow Ascend
 
-Vehicle Flow Ascend 是一个面向《人工智能导论》大作业的车辆大类识别与简单车流统计项目。当前实现支持 PC 端 YOLOv5 演示后端，并为后续昇腾 OM 部署保留统一检测器接口。
+Vehicle Flow Ascend 是一个面向《人工智能导论》大作业的车辆大类识别与简单车流统计项目。系统支持视频/摄像头输入、YOLOv5 车辆检测、4 类车辆大类映射、质心跟踪、单线穿越计数、结果叠加显示、输出视频保存，并提供 PC PyTorch 后端和昇腾 OM 后端。
+
+## 文档
+
+- [系统架构说明](docs/architecture.md)：模块划分、处理流程、检测器接口、计数算法和测试策略。
+- [昇腾部署说明](docs/ascend_deploy.md)：ONNX 导出、ATC 转 OM、CANN 环境和板端运行步骤。
+- [演示检查清单](docs/demo_checklist.md)：答辩前环境、模型、视频、计数线、昇腾端和备用方案检查。
+- [大作业报告大纲](docs/report_outline.md)：报告章节、实验表格、部署流程和改进方向参考。
 
 ## 安装
 
