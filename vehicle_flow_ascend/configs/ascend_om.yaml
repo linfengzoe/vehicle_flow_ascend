@@ -1,0 +1,12 @@
+source: 0
+backend: ascend_om
+model_path: models/yolov8n.om
+image_size: 640
+confidence_threshold: 0.35
+iou_threshold: 0.45
+line:
+  - [120, 360]
+  - [1160, 360]
+display: false
+output_video: runs/ascend_om_output.mp4
+max_frames: null

@@ -1,0 +1,43 @@
+from __future__ import annotations
+
+import argparse
+import json
+from collections.abc import Sequence
+
+from vehicle_flow_ascend.config import load_config_with_overrides
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Vehicle flow counting demo")
+    parser.add_argument("--config", required=True, help="Path to YAML configuration file")
+    parser.add_argument("--dry-run", action="store_true", help="Print resolved config and exit")
+    parser.add_argument("--source", help="Override source path or camera index")
+    parser.add_argument("--backend", help="Override backend name")
+    parser.add_argument("--display", choices=("true", "false"), help="Override display flag")
+    parser.add_argument("--max-frames", type=int, help="Override maximum frames to process")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    config = load_config_with_overrides(
+        args.config,
+        {
+            "source": args.source,
+            "backend": args.backend,
+            "display": args.display,
+            "max_frames": args.max_frames,
+        },
+    )
+
+    if args.dry_run:
+        print(json.dumps(config.to_dict(), indent=2, ensure_ascii=False))
+        return 0
+
+    parser.error("only --dry-run is implemented in Task 1")
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
