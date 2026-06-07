@@ -1,16 +1,30 @@
 from pathlib import Path
+import threading
+from http.server import ThreadingHTTPServer
+from io import BytesIO
 from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from vehicle_flow_ascend.config import VehicleFlowConfig, load_config
 from vehicle_flow_ascend.web.dashboard import (
     _dashboard_payload,
+    _make_handler,
     _media_status_payload,
+    _read_multipart_video_upload,
     _resolve_safe_media_path,
     _sanitize_start_payload,
 )
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+class _FakeStatusManager:
+    def __init__(self, status: dict | None = None) -> None:
+        self._status = status or {}
+
+    def status(self) -> dict:
+        return dict(self._status)
 
 
 def test_dashboard_payload_exposes_presentation_not_parameter_panel() -> None:
@@ -65,6 +79,7 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "particleCanvas" in index_html
     assert "videoFileInput" in index_html
     assert "cameraButton" in index_html
+    assert "cameraDeviceSelect" in index_html
     assert "realtimeStream" in index_html
     assert "cameraPreview" in index_html
     assert "captureCanvas" in index_html
@@ -78,6 +93,13 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "/api/realtime/start" in app_js
     assert "/api/realtime/frame" in app_js
     assert "/api/realtime/stream" in app_js
+    assert "AbortController" in app_js
+    assert "signal: abortController.signal" in app_js
+    assert "refreshCameraDevices" in app_js
+    assert "deviceId: { exact: selectedDeviceId }" in app_js
+    assert "MAX_REALTIME_FRAME_FAILURES" in app_js
+    assert "realtimeFrameFailures" in app_js
+    assert "scaleCaptureDimensions" in app_js
     assert "getUserMedia" in app_js
     assert "initParticles" in app_js
     assert "#particleCanvas" in styles_css
@@ -95,6 +117,27 @@ def test_media_status_payload_reports_missing_and_existing_file(tmp_path) -> Non
     existing = _media_status_payload(str(video))
     assert existing["exists"] is True
     assert existing["size"] == 4
+
+
+def test_multipart_upload_parser_extracts_video_field_bytes() -> None:
+    boundary = "----codex-boundary"
+    body = (
+        b"------codex-boundary\r\n"
+        b'Content-Disposition: form-data; name="video"; filename="demo.mp4"\r\n'
+        b"Content-Type: video/mp4\r\n"
+        b"\r\n"
+        b"abc\x00def\r\n"
+        b"------codex-boundary--\r\n"
+    )
+
+    filename, source = _read_multipart_video_upload(
+        f"multipart/form-data; boundary={boundary}",
+        body,
+    )
+
+    assert filename == "demo.mp4"
+    assert isinstance(source, BytesIO)
+    assert source.read() == b"abc\x00def"
 
 
 def test_sanitize_start_payload_removes_client_output_video() -> None:
@@ -215,3 +258,35 @@ def test_safe_media_path_defaults_to_inference_status_then_config(tmp_path) -> N
         "",
         {"output_video": str(inferred)},
     ) == inferred
+
+
+def test_output_media_endpoint_serves_byte_ranges(tmp_path) -> None:
+    output_video = tmp_path / "output.mp4"
+    output_video.write_bytes(b"abcdefghij")
+    config = VehicleFlowConfig(output_video=str(output_video))
+    handler = _make_handler(
+        config,
+        tmp_path,
+        _FakeStatusManager({"output_video": str(output_video)}),
+        _FakeStatusManager(),
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/media/output-video"
+        request = Request(url, headers={"Range": "bytes=2-5"})
+
+        with urlopen(request, timeout=3) as response:
+            body = response.read()
+            status = response.status
+            headers = response.headers
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert status == 206
+    assert headers["Content-Range"] == "bytes 2-5/10"
+    assert headers["Content-Length"] == "4"
+    assert body == b"cdef"

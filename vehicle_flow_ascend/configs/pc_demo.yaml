@@ -6,8 +6,8 @@ image_size: 640
 confidence_threshold: 0.35
 iou_threshold: 0.45
 line:
-  - [120, 360]
-  - [1160, 360]
+  - [0, 840]
+  - [1919, 840]
 display: true
 output_video: runs/pc_demo_output.mp4
 max_frames: 300

@@ -64,6 +64,8 @@ class RealtimeInferenceManager:
         self._processor: FrameProcessor | None = None
         self._latest_jpeg: bytes | None = None
         self._last_activity_at: float | None = None
+        self._inflight_frames = 0
+        self._release_after_inflight = False
         self._reaper_thread: threading.Thread | None = None
 
     def start(self) -> dict[str, Any]:
@@ -71,12 +73,15 @@ class RealtimeInferenceManager:
             self._expire_idle_session_locked()
             if self._state.status == "running":
                 raise RuntimeError("realtime inference session is already running")
+            if self._inflight_frames:
+                raise RuntimeError("realtime inference session is still stopping")
 
             detector = create_detector(self._base_config)
             self._detector = detector
             self._processor = FrameProcessor(self._base_config, detector)
             self._latest_jpeg = None
             self._last_activity_at = time.monotonic()
+            self._release_after_inflight = False
             now = time.time()
             self._state = RealtimeState(
                 status="running",
@@ -90,25 +95,47 @@ class RealtimeInferenceManager:
             return self._state.to_dict()
 
     def process_jpeg_frame(self, session_id: str, jpeg_bytes: bytes) -> dict[str, Any]:
+        frame_bgr = _decode_jpeg(jpeg_bytes)
         with self._condition:
             self._expire_idle_session_locked()
             self._validate_session(session_id)
-            frame_bgr = _decode_jpeg(jpeg_bytes)
             if self._processor is None:
                 raise RuntimeError("realtime inference processor is not initialized")
-            processed = self._processor.process(frame_bgr)
+            processor = self._processor
+            self._inflight_frames += 1
+
+        processed = None
+        output_jpeg = None
+        try:
+            processed = processor.process(frame_bgr)
             output_jpeg = _encode_jpeg(processed.annotated_frame)
-            now = time.time()
-            self._last_activity_at = time.monotonic()
-            self._latest_jpeg = output_jpeg
-            self._state.frames = processed.frames
-            self._state.fps = processed.fps
-            self._state.counts = dict(processed.counts)
-            self._state.frame_version += 1
-            self._state.updated_at = now
-            self._state.last_frame_at = now
-            self._condition.notify_all()
-            return self._state.to_dict()
+        finally:
+            with self._condition:
+                self._inflight_frames -= 1
+                if (
+                    processed is not None
+                    and output_jpeg is not None
+                    and self._state.status == "running"
+                    and self._state.session_id == session_id
+                    and self._processor is processor
+                ):
+                    self._apply_processed_frame_locked(processed, output_jpeg)
+                if self._release_after_inflight and self._inflight_frames == 0:
+                    self._release_resources_locked()
+                self._condition.notify_all()
+                state = self._state.to_dict()
+        return state
+
+    def _apply_processed_frame_locked(self, processed, output_jpeg: bytes) -> None:
+        now = time.time()
+        self._last_activity_at = time.monotonic()
+        self._latest_jpeg = output_jpeg
+        self._state.frames = processed.frames
+        self._state.fps = processed.fps
+        self._state.counts = dict(processed.counts)
+        self._state.frame_version += 1
+        self._state.updated_at = now
+        self._state.last_frame_at = now
 
     def status(self) -> dict[str, Any]:
         with self._condition:
@@ -127,7 +154,10 @@ class RealtimeInferenceManager:
                 self._state.status = "stopped"
                 self._state.stopped_at = now
                 self._state.updated_at = now
-            self._release_resources_locked()
+            if self._inflight_frames:
+                self._release_after_inflight = True
+            else:
+                self._release_resources_locked()
             self._condition.notify_all()
             return self._state.to_dict()
 
@@ -212,7 +242,10 @@ class RealtimeInferenceManager:
         self._state.stopped_at = now
         self._state.updated_at = now
         self._state.error = _IDLE_EXPIRED_ERROR
-        self._release_resources_locked()
+        if self._inflight_frames:
+            self._release_after_inflight = True
+        else:
+            self._release_resources_locked()
         self._condition.notify_all()
 
     def _release_resources_locked(self) -> None:
@@ -221,6 +254,7 @@ class RealtimeInferenceManager:
         self._processor = None
         self._latest_jpeg = None
         self._last_activity_at = None
+        self._release_after_inflight = False
         release = getattr(detector, "release", None)
         if callable(release):
             release()

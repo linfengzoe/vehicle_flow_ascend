@@ -6,6 +6,7 @@ data/
 models/*.pt
 models/*.onnx
 models/*.om
+third_party/
 results/
 *.mp4
 *.avi

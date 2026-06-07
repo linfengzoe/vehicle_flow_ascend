@@ -6,14 +6,20 @@ const state = {
   realtimePollTimer: null,
   captureTimer: null,
   frameUploadInFlight: false,
+  frameAbortController: null,
+  realtimeFrameFailures: 0,
   realtimeSessionId: null,
   cameraStream: null,
+  cameraDevices: [],
   lastOutputVideo: null,
   lastStatus: { status: 'idle', counts: { total: 0 }, frames: 0, fps: 0 },
   viewToken: 0,
 };
 
 const byId = (id) => document.getElementById(id);
+const MAX_REALTIME_FRAME_FAILURES = 5;
+const REALTIME_RETRY_MESSAGE = '实时帧传输不稳定，正在重试。';
+const MAX_CAPTURE_WIDTH = 960;
 
 const FALLBACK_CLASSES = [
   { key: 'car', label: '小型车', accent: '#ffb25d' },
@@ -116,6 +122,49 @@ function setMode(mode) {
 
 function classesConfig() {
   return state.dashboard?.classes?.length ? state.dashboard.classes : FALLBACK_CLASSES;
+}
+
+async function refreshCameraDevices({ silent = true } = {}) {
+  const select = byId('cameraDeviceSelect');
+  if (!navigator.mediaDevices?.enumerateDevices || !navigator.mediaDevices?.getUserMedia) {
+    select.innerHTML = '<option value="">当前浏览器不支持摄像头</option>';
+    select.disabled = true;
+    if (!silent) {
+      setError('当前浏览器不支持摄像头访问，请使用新版 Edge、Chrome 或 HTTPS/localhost 访问。');
+    }
+    return [];
+  }
+
+  try {
+    const previousValue = select.value;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter((device) => device.kind === 'videoinput');
+    state.cameraDevices = cameras;
+    select.disabled = cameras.length === 0;
+    select.innerHTML = cameras.length
+      ? [
+          '<option value="">自动选择摄像头</option>',
+          ...cameras.map((device, index) => {
+            const label = device.label || `摄像头 ${index + 1}`;
+            return `<option value="${escapeHtml(device.deviceId)}">${escapeHtml(label)}</option>`;
+          }),
+        ].join('')
+      : '<option value="">未发现摄像头</option>';
+    if (previousValue && cameras.some((device) => device.deviceId === previousValue)) {
+      select.value = previousValue;
+    }
+    if (!silent && cameras.length === 0) {
+      setError('未发现可用摄像头，请检查设备连接或浏览器权限。');
+    }
+    return cameras;
+  } catch (error) {
+    select.innerHTML = '<option value="">摄像头权限不可用</option>';
+    select.disabled = true;
+    if (!silent) {
+      setError(error.message);
+    }
+    return [];
+  }
 }
 
 function escapeHtml(value) {
@@ -294,6 +343,7 @@ function renderStatus(snapshot = {}) {
 async function loadDashboard() {
   state.dashboard = await requestJson('/api/dashboard');
   renderPipeline(state.dashboard.pipeline || FALLBACK_PIPELINE);
+  refreshCameraDevices().catch(() => {});
 
   const inference = state.dashboard.inference || { status: 'idle' };
   const realtime = state.dashboard.realtime || { status: 'idle' };
@@ -426,12 +476,17 @@ function cleanupLocalRealtimeSession() {
   setBusy(false);
 }
 
-function stopCaptureLoop() {
+function stopCaptureLoop(abortCurrent = false) {
   if (state.captureTimer) {
     clearInterval(state.captureTimer);
     state.captureTimer = null;
   }
+  if (abortCurrent && state.frameAbortController) {
+    state.frameAbortController.abort();
+    state.frameAbortController = null;
+  }
   state.frameUploadInFlight = false;
+  state.realtimeFrameFailures = 0;
 }
 
 function stopLocalTracks() {
@@ -447,7 +502,7 @@ function stopLocalTracks() {
 
 async function stopRealtimeSession(callApi = true, silent = false) {
   const sessionId = state.realtimeSessionId;
-  stopCaptureLoop();
+  stopCaptureLoop(true);
   stopRealtimePolling();
   stopLocalTracks();
   resetRealtimeStream();
@@ -494,39 +549,67 @@ function blobFromCanvas(canvas, type, quality) {
   });
 }
 
+function scaleCaptureDimensions(width, height) {
+  const scale = Math.min(1, MAX_CAPTURE_WIDTH / Math.max(width, height));
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
 async function captureAndSendFrame() {
   if (state.frameUploadInFlight || !state.realtimeSessionId) {
     return;
   }
 
+  const sessionId = state.realtimeSessionId;
   const preview = byId('cameraPreview');
   if (!preview.videoWidth || !preview.videoHeight) {
     return;
   }
 
   state.frameUploadInFlight = true;
+  const abortController = new AbortController();
+  state.frameAbortController = abortController;
   const canvas = byId('captureCanvas');
   const context = canvas.getContext('2d', { alpha: false });
-  if (canvas.width !== preview.videoWidth || canvas.height !== preview.videoHeight) {
-    canvas.width = preview.videoWidth;
-    canvas.height = preview.videoHeight;
+  const captureSize = scaleCaptureDimensions(preview.videoWidth, preview.videoHeight);
+  if (canvas.width !== captureSize.width || canvas.height !== captureSize.height) {
+    canvas.width = captureSize.width;
+    canvas.height = captureSize.height;
   }
 
   try {
     context.drawImage(preview, 0, 0, canvas.width, canvas.height);
-    const blob = await blobFromCanvas(canvas, 'image/jpeg', 0.82);
+    const blob = await blobFromCanvas(canvas, 'image/jpeg', 0.72);
     const snapshot = await requestJson(
-      `/api/realtime/frame?session_id=${encodeURIComponent(state.realtimeSessionId)}`,
+      `/api/realtime/frame?session_id=${encodeURIComponent(sessionId)}`,
       {
         method: 'POST',
         body: blob,
+        signal: abortController.signal,
         headers: {
           'Content-Type': 'image/jpeg',
         },
       },
     );
+    if (state.realtimeSessionId !== sessionId) {
+      return;
+    }
+    state.realtimeFrameFailures = 0;
+    if (byId('errorLine').textContent === REALTIME_RETRY_MESSAGE) {
+      setError('');
+    }
     renderStatus(snapshot);
   } catch (error) {
+    if (error.name === 'AbortError' || state.realtimeSessionId !== sessionId) {
+      return;
+    }
+    state.realtimeFrameFailures += 1;
+    if (state.realtimeFrameFailures < MAX_REALTIME_FRAME_FAILURES) {
+      setError(REALTIME_RETRY_MESSAGE);
+      return;
+    }
     setError(error.message);
     const stopped = await stopRealtimeSession(true);
     showEmptyState(
@@ -536,12 +619,17 @@ async function captureAndSendFrame() {
         : '浏览器与后端之间的实时传输失败，且后端会话可能仍在运行，请再次点击停止。',
     );
   } finally {
-    state.frameUploadInFlight = false;
+    if (state.frameAbortController === abortController) {
+      state.frameAbortController = null;
+    }
+    if (state.realtimeSessionId === sessionId) {
+      state.frameUploadInFlight = false;
+    }
   }
 }
 
 function startCaptureLoop() {
-  stopCaptureLoop();
+  stopCaptureLoop(true);
   state.captureTimer = setInterval(() => {
     captureAndSendFrame().catch((error) => setError(error.message));
   }, 100);
@@ -588,14 +676,27 @@ async function startCameraFlow() {
   let stream;
 
   try {
+    const cameras = await refreshCameraDevices({ silent: false });
+    if (cameras.length === 0) {
+      throw new Error('未发现可用摄像头。');
+    }
+    const selectedDeviceId = byId('cameraDeviceSelect').value;
+    const video = selectedDeviceId
+      ? {
+          deviceId: { exact: selectedDeviceId },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        }
+      : {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        };
     stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'environment',
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
+      video,
       audio: false,
     });
+    refreshCameraDevices().catch(() => {});
 
     const started = await requestJson('/api/realtime/start', { method: 'POST', json: {} });
     state.realtimeSessionId = started.session_id;
@@ -701,6 +802,9 @@ function bindEvents() {
     if (byId('videoFileInput').files?.[0]) {
       setError('');
     }
+  });
+  byId('cameraDeviceSelect').addEventListener('change', () => {
+    setError('');
   });
   window.addEventListener('beforeunload', () => {
     notifyRealtimeStopOnUnload();

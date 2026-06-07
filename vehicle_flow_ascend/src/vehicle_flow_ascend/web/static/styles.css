@@ -165,7 +165,6 @@ h3 {
 
 .hero-copy > p:last-child,
 .panel-copy,
-.info-card p,
 .empty-state p,
 .error-line {
   color: var(--muted);
@@ -352,13 +351,15 @@ h3 {
   min-height: 320px;
 }
 
-.file-field {
+.file-field,
+.select-field {
   display: grid;
   gap: 10px;
   margin-top: 22px;
 }
 
 .file-field span,
+.select-field span,
 .telemetry-grid span,
 .class-chip span {
   color: var(--muted);
@@ -368,7 +369,8 @@ h3 {
   text-transform: uppercase;
 }
 
-.file-field input {
+.file-field input,
+.select-field select {
   width: 100%;
   min-height: 48px;
   padding: 12px 14px;
@@ -377,6 +379,16 @@ h3 {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.05);
   font-family: var(--mono);
+}
+
+.select-field select {
+  appearance: none;
+  cursor: pointer;
+}
+
+.select-field select:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
 }
 
 .file-field input::file-selector-button {
@@ -444,19 +456,6 @@ h3 {
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
-}
-
-.info-card {
-  margin-top: 18px;
-  padding: 16px;
-  border: 1px solid rgba(255, 178, 93, 0.16);
-  border-radius: 18px;
-  background: rgba(255, 178, 93, 0.06);
-}
-
-.info-card strong {
-  display: block;
-  margin-bottom: 8px;
 }
 
 .telemetry-grid {

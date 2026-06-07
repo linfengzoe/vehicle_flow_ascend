@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-import cgi
 import json
 import os
 from dataclasses import dataclass
+from email.message import Message
+from email.parser import BytesParser
+from email.policy import default as email_policy
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -131,21 +134,13 @@ def _make_handler(
                 length = int(self.headers.get("Content-Length", "0"))
                 if length > _MAX_UPLOAD_BYTES:
                     raise ValueError("uploaded video is too large")
-                form = cgi.FieldStorage(
-                    fp=self.rfile,
-                    headers=self.headers,
-                    environ={
-                        "REQUEST_METHOD": "POST",
-                        "CONTENT_TYPE": content_type,
-                        "CONTENT_LENGTH": str(max(length, 0)),
-                    },
+                if length <= 0:
+                    raise ValueError("uploaded video body is empty")
+                filename, source = _read_multipart_video_upload(
+                    content_type,
+                    self.rfile.read(length),
                 )
-                if "video" not in form:
-                    raise ValueError("missing form field: video")
-                item = form["video"]
-                if not getattr(item, "filename", ""):
-                    raise ValueError("uploaded video filename is empty")
-                self._send_json(task_manager.upload(item.filename, item.file))
+                self._send_json(task_manager.upload(filename, source))
             except Exception as exc:  # noqa: BLE001 - return upload issue to UI
                 self._send_json({"error": str(exc)}, status=400)
 
@@ -265,8 +260,36 @@ def _make_handler(
                 self.send_error(404, f"output video not found: {path}")
                 return
             size = path.stat().st_size
+            byte_range = self.headers.get("Range")
+            if byte_range:
+                media_range = _parse_byte_range(byte_range, size)
+                if media_range is None:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.end_headers()
+                    return
+                start, end = media_range
+                length = end - start + 1
+                self.send_response(206)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                self.send_header("Content-Length", str(length))
+                self.end_headers()
+                with path.open("rb") as media_file:
+                    media_file.seek(start)
+                    remaining = length
+                    while remaining > 0:
+                        chunk = media_file.read(min(_MEDIA_CHUNK_BYTES, remaining))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+                return
+
             self.send_response(200)
             self.send_header("Content-Type", "video/mp4")
+            self.send_header("Accept-Ranges", "bytes")
             self.send_header("Content-Length", str(size))
             self.end_headers()
             with path.open("rb") as media_file:
@@ -277,6 +300,80 @@ def _make_handler(
                     self.wfile.write(chunk)
 
     return DashboardRequestHandler
+
+
+def _read_multipart_video_upload(content_type: str, body: bytes) -> tuple[str, BytesIO]:
+    boundary = _multipart_boundary(content_type)
+    delimiter = b"--" + boundary.encode("utf-8")
+    for raw_part in body.split(delimiter):
+        part = _normalize_multipart_part(raw_part)
+        if not part:
+            continue
+        separator = b"\r\n\r\n" if b"\r\n\r\n" in part else b"\n\n"
+        if separator not in part:
+            continue
+        header_bytes, payload = part.split(separator, 1)
+        headers = BytesParser(policy=email_policy).parsebytes(header_bytes + b"\r\n\r\n")
+        if headers.get_content_disposition() != "form-data":
+            continue
+        if headers.get_param("name", header="content-disposition") != "video":
+            continue
+        filename = headers.get_filename()
+        if not filename:
+            raise ValueError("uploaded video filename is empty")
+        return filename, BytesIO(payload)
+    raise ValueError("missing form field: video")
+
+
+def _multipart_boundary(content_type: str) -> str:
+    message = Message()
+    message["Content-Type"] = content_type
+    boundary = message.get_boundary()
+    if not boundary:
+        raise ValueError("multipart/form-data boundary is missing")
+    return boundary
+
+
+def _normalize_multipart_part(part: bytes) -> bytes:
+    if not part or part.startswith(b"--"):
+        return b""
+    if part.startswith(b"\r\n"):
+        part = part[2:]
+    elif part.startswith(b"\n"):
+        part = part[1:]
+    if part.endswith(b"\r\n"):
+        part = part[:-2]
+    elif part.endswith(b"\n"):
+        part = part[:-1]
+    return part
+
+
+def _parse_byte_range(range_header: str, size: int) -> tuple[int, int] | None:
+    if size <= 0 or not range_header.startswith("bytes="):
+        return None
+    range_spec = range_header.removeprefix("bytes=").strip()
+    if "," in range_spec or "-" not in range_spec:
+        return None
+    start_text, end_text = [part.strip() for part in range_spec.split("-", 1)]
+    try:
+        if start_text == "":
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                return None
+            start = max(size - suffix_length, 0)
+            end = size - 1
+        else:
+            start = int(start_text)
+            end = int(end_text) if end_text else size - 1
+            if start < 0 or end < start:
+                return None
+            end = min(end, size - 1)
+    except ValueError:
+        return None
+    if start >= size:
+        return None
+    return start, end
+
 
 def _required_query_param(query: str, name: str) -> str:
     params = parse_qs(query)

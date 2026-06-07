@@ -23,8 +23,8 @@ def test_load_pc_demo_yaml() -> None:
     assert config.image_size == 640
     assert config.confidence_threshold == pytest.approx(0.35)
     assert config.iou_threshold == pytest.approx(0.45)
-    assert config.line.start == (120, 360)
-    assert config.line.end == (1160, 360)
+    assert config.line.start == (0, 840)
+    assert config.line.end == (1919, 840)
     assert config.display is True
     assert config.output_video == "runs/pc_demo_output.mp4"
     assert config.max_frames == 300

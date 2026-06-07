@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 
 import cv2
@@ -19,6 +20,21 @@ class FakeDetector:
     def detect(self, frame_bgr) -> list[Detection]:
         height, width = frame_bgr.shape[:2]
         return [Detection(1, 1, min(width - 1, 8), min(height - 1, 8), 0.8, "car")]
+
+    def release(self) -> None:
+        self.released = True
+
+
+class BlockingDetector:
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release_detection = threading.Event()
+        self.released = False
+
+    def detect(self, frame_bgr) -> list[Detection]:
+        self.entered.set()
+        self.release_detection.wait(timeout=2)
+        return []
 
     def release(self) -> None:
         self.released = True
@@ -73,6 +89,42 @@ def test_realtime_manager_stop_releases_detector(monkeypatch) -> None:
 
     assert stopped["status"] == "stopped"
     assert detector.released is True
+
+
+def test_realtime_manager_stop_is_not_blocked_by_inflight_frame(monkeypatch) -> None:
+    detector = BlockingDetector()
+    monkeypatch.setattr(realtime, "create_detector", lambda config: detector)
+    manager = RealtimeInferenceManager(VehicleFlowConfig())
+    session_id = manager.start()["session_id"]
+    frame_errors = []
+
+    def process_frame() -> None:
+        try:
+            manager.process_jpeg_frame(session_id, jpeg_bytes())
+        except Exception as exc:  # noqa: BLE001 - record worker outcome for assertion context
+            frame_errors.append(exc)
+
+    frame_thread = threading.Thread(target=process_frame)
+    frame_thread.start()
+    assert detector.entered.wait(timeout=1)
+
+    stopped_payload = {}
+
+    def stop_session() -> None:
+        stopped_payload.update(manager.stop(session_id))
+
+    stop_thread = threading.Thread(target=stop_session)
+    stop_thread.start()
+    stop_thread.join(timeout=0.2)
+
+    assert stopped_payload.get("status") == "stopped"
+
+    detector.release_detection.set()
+    frame_thread.join(timeout=2)
+    stop_thread.join(timeout=2)
+
+    assert detector.released is True
+    assert frame_errors == []
 
 
 def test_realtime_manager_stop_requires_session_id(monkeypatch) -> None:
