@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from vehicle_flow_ascend.config import SourceConfig, load_config
@@ -5,7 +7,8 @@ from vehicle_flow_ascend.detectors.ascend_om import AscendOmDetector, _ASCEND_RU
 from vehicle_flow_ascend.detectors.base import create_detector
 
 
-PROJECT_CONFIG = "vehicle_flow_ascend/configs/ascend_om.yaml"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_CONFIG = PROJECT_ROOT / "configs" / "ascend_om.yaml"
 
 
 def test_load_ascend_om_yaml() -> None:

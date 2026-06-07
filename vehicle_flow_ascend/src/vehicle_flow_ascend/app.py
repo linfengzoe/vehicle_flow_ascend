@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
 import cv2
 
 from vehicle_flow_ascend.config import VehicleFlowConfig
@@ -48,6 +52,42 @@ class _NullVideoWriter:
         self.released = True
 
 
+@dataclass
+class ProcessedFrame:
+    annotated_frame: Any
+    frames: int
+    fps: float
+    counts: dict[str, int]
+
+
+class FrameProcessor:
+    def __init__(self, config: VehicleFlowConfig, detector: Detector) -> None:
+        self.detector = detector
+        self.tracker = CentroidTracker()
+        self.counter = LineCounter(_line_from_config(config))
+        self.fps_meter = FpsMeter()
+        self.frames = 0
+
+    @property
+    def counts(self) -> dict[str, int]:
+        return self.counter.snapshot()
+
+    def process(self, frame_bgr) -> ProcessedFrame:
+        detections = self.detector.detect(frame_bgr)
+        tracks = self.tracker.update(detections)
+        self.counter.update(tracks)
+        fps = self.fps_meter.tick()
+        counts = self.counter.snapshot()
+        annotated = draw_overlay(frame_bgr, detections, tracks, self.counter.line, counts, fps)
+        self.frames += 1
+        return ProcessedFrame(
+            annotated_frame=annotated,
+            frames=self.frames,
+            fps=fps,
+            counts=counts,
+        )
+
+
 def run_app(
     config: VehicleFlowConfig,
     detector: Detector,
@@ -55,6 +95,8 @@ def run_app(
     video_source=None,
     video_writer=None,
     show_window: bool | None = None,
+    stop_requested: Callable[[], bool] | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, int]:
     source = video_source or VideoSource(config.source)
     writer = video_writer
@@ -63,34 +105,36 @@ def run_app(
     if writer is None:
         writer = VideoWriter(config.output_video, source.fps, source.frame_size)
 
-    tracker = CentroidTracker()
-    counter = LineCounter(_line_from_config(config))
-    fps_meter = FpsMeter()
+    processor = FrameProcessor(config, detector)
     display = config.display if show_window is None else show_window
-    processed_frames = 0
 
     try:
         while True:
-            if config.max_frames is not None and processed_frames >= config.max_frames:
+            if stop_requested is not None and stop_requested():
+                break
+            if config.max_frames is not None and processor.frames >= config.max_frames:
                 break
 
             frame = source.read()
             if frame is None:
                 break
 
-            detections = detector.detect(frame)
-            tracks = tracker.update(detections)
-            counter.update(tracks)
-            fps = fps_meter.tick()
-            annotated = draw_overlay(frame, detections, tracks, counter.line, counter.snapshot(), fps)
-            writer.write(annotated)
+            processed = processor.process(frame)
+            writer.write(processed.annotated_frame)
+
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "frames": processed.frames,
+                        "fps": processed.fps,
+                        "counts": processed.counts,
+                    }
+                )
 
             if display:
-                cv2.imshow("vehicle-flow-ascend", annotated)
+                cv2.imshow("vehicle-flow-ascend", processed.annotated_frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
-
-            processed_frames += 1
     finally:
         if display:
             cv2.destroyWindow("vehicle-flow-ascend")
@@ -99,7 +143,7 @@ def run_app(
         if owns_source:
             source.release()
 
-    return counter.snapshot()
+    return processor.counts
 
 
 def sequence_video_source(frames, fps: float = 30.0):

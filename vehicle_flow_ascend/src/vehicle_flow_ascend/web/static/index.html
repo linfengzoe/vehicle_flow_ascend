@@ -4,167 +4,119 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Vehicle Flow Ascend Console</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23090d0b'/%3E%3Cpath d='M12 39h40l-4-13H16z' fill='%23b8ff3d'/%3E%3Ccircle cx='22' cy='43' r='5' fill='%23090d0b'/%3E%3Ccircle cx='44' cy='43' r='5' fill='%23090d0b'/%3E%3Cpath d='M18 25h28l-5-8H24z' fill='%233fd7ff'/%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%230b0e15'/%3E%3Cpath d='M10 40h44l-4-13H14z' fill='%23ffb25d'/%3E%3Ccircle cx='22' cy='44' r='5' fill='%230b0e15'/%3E%3Ccircle cx='43' cy='44' r='5' fill='%230b0e15'/%3E%3Cpath d='M18 23h28l-6-9H25z' fill='%23ffd39b'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body>
-  <div class="scanline" aria-hidden="true"></div>
-  <main class="shell">
-    <section class="hero panel">
-      <div>
-        <p class="eyebrow">ASCEND EDGE VISION / INTERACTIVE CONSOLE</p>
-        <h1>车辆大类识别与单线车流统计系统</h1>
-        <p class="hero-copy">可编辑参数、实时生成运行命令、复制到终端执行，并在同一页面预览输出视频。保持网页安全可控，不直接启动模型进程。</p>
+<body class="city-night">
+  <canvas id="particleCanvas" aria-hidden="true"></canvas>
+  <div class="ambient-glow" aria-hidden="true"></div>
+
+  <main class="page-shell">
+    <section class="hero-card glass-card">
+      <div class="hero-copy">
+        <p class="kicker">CITY-NIGHT TRAFFIC FLOW</p>
+        <h1>车辆大类识别与车流统计</h1>
+        <p>
+          只保留两个入口：上传本地视频，或开启浏览器摄像头。前端负责轻量交互，后端完成推理、统计与标注输出。
+        </p>
       </div>
-      <div class="status-card" id="runtimeStatus">
-        <span class="status-dot"></span>
+      <div class="status-pill" id="statusPill" data-status="idle" aria-live="polite">
+        <span class="status-pill__dot"></span>
         <div>
-          <strong>WAITING FOR TELEMETRY</strong>
-          <small>正在读取 /api/dashboard</small>
+          <strong>系统待命</strong>
+          <small>选择上传视频或开启摄像头</small>
         </div>
       </div>
     </section>
 
     <section class="dashboard-grid">
-      <article class="video-panel panel">
-        <div class="panel-heading">
+      <article class="result-panel glass-card">
+        <div class="section-head">
           <div>
-            <p class="eyebrow">LIVE OUTPUT</p>
-            <h2>演示画面</h2>
+            <p class="kicker">RESULT STAGE</p>
+            <h2>推理结果主屏</h2>
           </div>
-          <div class="panel-actions">
-            <span class="chip" id="backendChip">backend</span>
-            <button class="ghost-button" id="refreshPreviewButton" type="button">刷新预览</button>
-          </div>
+          <button class="stop-button" id="stopButton" type="button">停止当前任务</button>
         </div>
-        <div class="video-stage" id="videoStage">
-          <div class="road-grid" aria-hidden="true">
-            <span class="count-line"></span>
-            <span class="vehicle vehicle-a"></span>
-            <span class="vehicle vehicle-b"></span>
-            <span class="vehicle vehicle-c"></span>
+
+        <div class="result-stage">
+          <div class="empty-state" id="emptyState">
+            <span class="empty-state__halo"></span>
+            <h3>选择一个入口开始</h3>
+            <p>上传本地视频以生成结果视频，或开启浏览器摄像头进入实时车流观察。</p>
           </div>
-          <div class="placeholder-copy">
-            <strong id="videoTitle">等待输出视频</strong>
-            <span id="videoHint">运行 PC 或昇腾演示后，将输出视频写入 runs/。</span>
+
+          <img id="realtimeStream" alt="实时推理标注画面" hidden />
+          <video id="resultVideo" controls playsinline preload="metadata" hidden></video>
+
+          <div class="preview-dock" id="cameraPreviewDock" hidden>
+            <div class="preview-dock__head">
+              <span>本地预览</span>
+              <small>10 FPS 上传</small>
+            </div>
+            <video id="cameraPreview" autoplay muted playsinline hidden></video>
           </div>
+
+          <canvas id="captureCanvas" width="1280" height="720" hidden aria-hidden="true"></canvas>
         </div>
       </article>
 
-      <aside class="panel command-panel">
-        <p class="eyebrow">COMMAND CONSOLE</p>
-        <h2>交互控制台</h2>
-        <form class="control-form" id="controlForm">
-          <label>
-            <span>视频源 / 摄像头</span>
-            <input id="sourceInput" name="source" placeholder="data/demo.mp4 或 0" />
-          </label>
-          <label>
-            <span>推理后端</span>
-            <select id="backendSelect" name="backend">
-              <option value="torch_yolov5">torch_yolov5</option>
-              <option value="ascend_om">ascend_om</option>
-            </select>
-          </label>
-          <label>
-            <span>模型路径</span>
-            <input id="modelPathInput" name="modelPath" placeholder="models/yolov5n.pt" />
-          </label>
-          <label>
-            <span>输出视频</span>
-            <input id="outputVideoInput" name="outputVideo" placeholder="runs/pc_demo_output.mp4" />
-          </label>
-          <div class="form-row">
-            <label>
-              <span>输入尺寸</span>
-              <input id="imageSizeInput" name="imageSize" type="number" min="32" step="32" placeholder="640" />
-            </label>
-            <label>
-              <span>昇腾 SOC</span>
-              <input id="socVersionInput" name="socVersion" placeholder="Ascend310B4" />
-            </label>
-          </div>
-          <div class="form-row">
-            <label>
-              <span>置信度</span>
-              <input id="confidenceInput" name="confidence" type="number" min="0" max="1" step="0.01" />
-            </label>
-            <label>
-              <span>IoU</span>
-              <input id="iouInput" name="iou" type="number" min="0" max="1" step="0.01" />
-            </label>
-          </div>
-          <div class="form-row">
-            <label>
-              <span>最大帧数</span>
-              <input id="maxFramesInput" name="maxFrames" type="number" min="1" placeholder="空 = 不限制" />
-            </label>
-            <label>
-              <span>OpenCV 窗口</span>
-              <select id="displaySelect" name="display">
-                <option value="true">true</option>
-                <option value="false">false</option>
-              </select>
-            </label>
-          </div>
-          <div class="form-row">
-            <label>
-              <span>计数线起点</span>
-              <input id="lineStartInput" name="lineStart" placeholder="120,360" />
-            </label>
-            <label>
-              <span>计数线终点</span>
-              <input id="lineEndInput" name="lineEnd" placeholder="1160,360" />
-            </label>
-          </div>
-          <div class="button-row">
-            <button class="primary-button" id="generateButton" type="button">生成命令</button>
-            <button class="ghost-button" id="copyButton" type="button">复制命令</button>
-          </div>
-        </form>
-        <div class="command-output">
-          <div class="command-output-head">
-            <span>PowerShell</span>
-            <small id="copyStatus">未复制</small>
-          </div>
-          <pre id="commandText">等待配置载入...</pre>
+      <aside class="control-panel glass-card">
+        <p class="kicker">ENTRY POINTS</p>
+        <h2>开始观测</h2>
+        <p class="panel-copy">
+          前端不再暴露工程参数。选择文件后上传并启动推理，或直接调用浏览器摄像头开始实时分析。
+        </p>
+
+        <label class="file-field" for="videoFileInput">
+          <span>本地视频文件</span>
+          <input id="videoFileInput" type="file" accept="video/*" />
+        </label>
+
+        <div class="action-stack">
+          <button class="primary-button" id="uploadVideoButton" type="button">上传视频并分析</button>
+          <button class="secondary-button" id="cameraButton" type="button">开启摄像头</button>
+        </div>
+
+        <div class="info-card">
+          <strong>前端执行路径</strong>
+          <p>上传视频会自动完成上传、启动任务、轮询状态和播放结果。摄像头模式会采集浏览器画面帧并显示后端 MJPEG 标注流。</p>
         </div>
       </aside>
 
-      <aside class="panel metric-panel">
-        <p class="eyebrow">COUNT BOARD</p>
-        <h2>车辆分类</h2>
-        <div class="class-list" id="classList"></div>
+      <aside class="metrics-panel glass-card">
+        <p class="kicker">LIVE TELEMETRY</p>
+        <h2>实时状态</h2>
+        <div class="telemetry-grid">
+          <div>
+            <span>状态</span>
+            <strong id="taskStatus">idle</strong>
+          </div>
+          <div>
+            <span>累计帧数</span>
+            <strong id="taskFrames">0</strong>
+          </div>
+          <div>
+            <span>当前 FPS</span>
+            <strong id="taskFps">0.0</strong>
+          </div>
+          <div>
+            <span>总计数</span>
+            <strong id="taskTotal">0</strong>
+          </div>
+        </div>
+        <div class="class-counts" id="classCounts"></div>
+        <p class="error-line" id="errorLine" role="alert" aria-live="assertive"></p>
       </aside>
 
-      <article class="panel pipeline-panel">
-        <p class="eyebrow">PIPELINE</p>
-        <h2>处理流程</h2>
-        <ol class="pipeline" id="pipelineList"></ol>
-      </article>
-
-      <article class="panel config-panel">
-        <p class="eyebrow">RUNTIME CONFIG</p>
-        <h2>运行配置</h2>
-        <dl class="config-list" id="configList"></dl>
-      </article>
-
-      <article class="panel deploy-panel">
-        <p class="eyebrow">DEPLOYMENT PATH</p>
-        <h2>边缘部署链路</h2>
-        <div class="deploy-chain">
-          <span>.pt</span>
-          <i></i>
-          <span>ONNX</span>
-          <i></i>
-          <span>OM</span>
-          <i></i>
-          <span>Ascend</span>
-        </div>
-        <p class="deploy-note">网页不会直接启动模型推理；请复制生成的命令到终端执行。这样答辩现场更可控，也避免浏览器阻塞推理进程。</p>
+      <article class="pipeline-panel glass-card">
+        <p class="kicker">PIPELINE</p>
+        <h2>后台处理流程</h2>
+        <ol id="pipelineList"></ol>
       </article>
     </section>
   </main>
+
   <script src="/app.js" defer></script>
 </body>
 </html>
