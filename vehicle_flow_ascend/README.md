@@ -53,3 +53,27 @@ python -m vehicle_flow_ascend --config configs/pc_demo.yaml --source data/demo.m
 ```
 
 运行时会显示检测框、车辆类别、计数线、总车流量、分类计数和 FPS，并按配置保存标注后的视频到 `runs/pc_demo_output.mp4`。
+
+## 可视化前端
+
+项目内置一个无需 Node/Vite 的 Web Dashboard，适合答辩时展示系统状态、车辆类别、推理后端、计数线配置、部署链路和输出视频。
+
+启动前端：
+
+```bash
+python -m vehicle_flow_ascend --config configs/pc_demo.yaml --web
+```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8765
+```
+
+如需改监听地址和端口：
+
+```bash
+python -m vehicle_flow_ascend --config configs/pc_demo.yaml --web --web-host 0.0.0.0 --web-port 8899
+```
+
+前端会读取 `/api/dashboard` 获取配置状态；如果 `output_video` 指向的 MP4 已存在，会在页面中直接展示标注后视频。

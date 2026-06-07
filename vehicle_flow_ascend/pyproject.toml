@@ -27,6 +27,9 @@ vehicle-flow-ascend = "vehicle_flow_ascend.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+vehicle_flow_ascend = ["web/static/*"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

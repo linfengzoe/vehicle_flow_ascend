@@ -59,6 +59,32 @@ def test_dry_run_does_not_import_heavy_runtime_modules(capsys) -> None:
     assert "acl" not in sys.modules
 
 
+def test_web_run_starts_dashboard(monkeypatch) -> None:
+    from vehicle_flow_ascend.web import dashboard
+
+    calls = {}
+
+    def fake_run_dashboard(config, server_config):
+        calls["backend"] = config.backend
+        calls["host"] = server_config.host
+        calls["port"] = server_config.port
+
+    monkeypatch.setattr(dashboard, "run_dashboard", fake_run_dashboard)
+
+    exit_code = main([
+        "--config",
+        str(PROJECT_ROOT / "configs" / "pc_demo.yaml"),
+        "--web",
+        "--web-host",
+        "0.0.0.0",
+        "--web-port",
+        "8899",
+    ])
+
+    assert exit_code == 0
+    assert calls == {"backend": "torch_yolov5", "host": "0.0.0.0", "port": 8899}
+
+
 def test_normal_run_creates_detector_and_runs_app(monkeypatch, capsys) -> None:
     from vehicle_flow_ascend import app
     from vehicle_flow_ascend.detectors import base

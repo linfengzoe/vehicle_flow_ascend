@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vehicle Flow Ascend Console</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="scanline" aria-hidden="true"></div>
+  <main class="shell">
+    <section class="hero panel">
+      <div>
+        <p class="eyebrow">ASCEND EDGE VISION / YOLOV5N</p>
+        <h1>车辆大类识别与单线车流统计系统</h1>
+        <p class="hero-copy">面向课程答辩的边缘 AI 监控台：统一展示视频源、推理后端、计数线、车辆类别、部署链路与演示状态。</p>
+      </div>
+      <div class="status-card" id="runtimeStatus">
+        <span class="status-dot"></span>
+        <div>
+          <strong>WAITING FOR TELEMETRY</strong>
+          <small>正在读取 /api/dashboard</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="video-panel panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">LIVE OUTPUT</p>
+            <h2>演示画面</h2>
+          </div>
+          <span class="chip" id="backendChip">backend</span>
+        </div>
+        <div class="video-stage" id="videoStage">
+          <div class="road-grid" aria-hidden="true">
+            <span class="count-line"></span>
+            <span class="vehicle vehicle-a"></span>
+            <span class="vehicle vehicle-b"></span>
+            <span class="vehicle vehicle-c"></span>
+          </div>
+          <div class="placeholder-copy">
+            <strong id="videoTitle">等待输出视频</strong>
+            <span id="videoHint">运行 PC 或昇腾演示后，将输出视频写入 runs/。</span>
+          </div>
+        </div>
+      </article>
+
+      <aside class="panel metric-panel">
+        <p class="eyebrow">COUNT BOARD</p>
+        <h2>车辆分类</h2>
+        <div class="class-list" id="classList"></div>
+      </aside>
+
+      <article class="panel pipeline-panel">
+        <p class="eyebrow">PIPELINE</p>
+        <h2>处理流程</h2>
+        <ol class="pipeline" id="pipelineList"></ol>
+      </article>
+
+      <article class="panel config-panel">
+        <p class="eyebrow">RUNTIME CONFIG</p>
+        <h2>运行配置</h2>
+        <dl class="config-list" id="configList"></dl>
+      </article>
+
+      <article class="panel deploy-panel">
+        <p class="eyebrow">DEPLOYMENT PATH</p>
+        <h2>边缘部署链路</h2>
+        <div class="deploy-chain">
+          <span>.pt</span>
+          <i></i>
+          <span>ONNX</span>
+          <i></i>
+          <span>OM</span>
+          <i></i>
+          <span>Ascend</span>
+        </div>
+        <p class="deploy-note">当前前端读取同一份 YAML 配置，可用于 PC 演示和昇腾板端演示前的状态确认。</p>
+      </article>
+    </section>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>
