@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from vehicle_flow_ascend.cli import main
 
 
@@ -31,8 +33,24 @@ def test_dry_run_applies_cli_overrides(capsys) -> None:
         "0",
         "--backend",
         "ascend_om",
+        "--model-path",
+        "models/custom.om",
+        "--soc-version",
+        "Ascend310B4",
+        "--image-size",
+        "512",
+        "--confidence-threshold",
+        "0.42",
+        "--iou-threshold",
+        "0.51",
+        "--line-start",
+        "10,20",
+        "--line-end",
+        "300,400",
         "--display",
         "false",
+        "--output-video",
+        "runs/custom.mp4",
         "--max-frames",
         "12",
     ])
@@ -41,8 +59,39 @@ def test_dry_run_applies_cli_overrides(capsys) -> None:
     output = json.loads(capsys.readouterr().out)
     assert output["source"] == 0
     assert output["backend"] == "ascend_om"
+    assert output["model_path"] == "models/custom.om"
+    assert output["soc_version"] == "Ascend310B4"
+    assert output["image_size"] == 512
+    assert output["confidence_threshold"] == 0.42
+    assert output["iou_threshold"] == 0.51
+    assert output["line"] == [[10, 20], [300, 400]]
     assert output["display"] is False
+    assert output["output_video"] == "runs/custom.mp4"
     assert output["max_frames"] == 12
+
+
+def test_line_override_requires_start_and_end() -> None:
+    with pytest.raises(SystemExit):
+        main([
+            "--config",
+            str(PROJECT_ROOT / "configs" / "pc_demo.yaml"),
+            "--dry-run",
+            "--line-start",
+            "10,20",
+        ])
+
+
+def test_line_override_rejects_invalid_point() -> None:
+    with pytest.raises(SystemExit):
+        main([
+            "--config",
+            str(PROJECT_ROOT / "configs" / "pc_demo.yaml"),
+            "--dry-run",
+            "--line-start",
+            "bad",
+            "--line-end",
+            "30,40",
+        ])
 
 
 def test_dry_run_does_not_import_heavy_runtime_modules(capsys) -> None:

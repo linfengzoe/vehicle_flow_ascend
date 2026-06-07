@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from vehicle_flow_ascend.config import VehicleFlowConfig
 
@@ -41,8 +41,12 @@ def _make_handler(config: VehicleFlowConfig, static_dir: Path):
             if parsed.path == "/api/dashboard":
                 self._send_json(_dashboard_payload(config))
                 return
+            if parsed.path == "/api/media-status":
+                media_path = _media_path_from_query(config, parsed.query)
+                self._send_json(_media_status_payload(media_path))
+                return
             if parsed.path == "/media/output-video":
-                self._send_media(config.output_video)
+                self._send_media(_media_path_from_query(config, parsed.query))
                 return
             if parsed.path == "/" or parsed.path == "":
                 self.path = "/index.html"
@@ -75,6 +79,26 @@ def _make_handler(config: VehicleFlowConfig, static_dir: Path):
             self.wfile.write(body)
 
     return DashboardRequestHandler
+
+
+def _media_path_from_query(config: VehicleFlowConfig, query: str) -> str | None:
+    params = parse_qs(query)
+    value = params.get("path", [config.output_video])[0]
+    if value is None or value == "":
+        return config.output_video
+    return unquote(value)
+
+
+def _media_status_payload(media_path: str | None) -> dict[str, Any]:
+    if media_path is None:
+        return {"path": None, "exists": False, "size": 0}
+    path = Path(media_path)
+    exists = path.exists() and path.is_file()
+    return {
+        "path": media_path,
+        "exists": exists,
+        "size": path.stat().st_size if exists else 0,
+    }
 
 
 def _dashboard_payload(config: VehicleFlowConfig) -> dict[str, Any]:
@@ -110,6 +134,6 @@ def _dashboard_payload(config: VehicleFlowConfig) -> dict[str, Any]:
             "类别映射",
             "质心跟踪",
             "单线穿越计数",
-            "前端监控展示",
+            "交互式前端控制台",
         ],
     }

@@ -103,8 +103,24 @@ class VehicleFlowConfig:
             updates["source"] = SourceConfig.from_value(overrides["source"])
         if "backend" in overrides and overrides["backend"] is not None:
             updates["backend"] = str(overrides["backend"])
+        if "model_path" in overrides and overrides["model_path"] is not None:
+            updates["model_path"] = _optional_str(overrides["model_path"])
+        if "yolov5_repo_path" in overrides and overrides["yolov5_repo_path"] is not None:
+            updates["yolov5_repo_path"] = _optional_str(overrides["yolov5_repo_path"])
+        if "soc_version" in overrides and overrides["soc_version"] is not None:
+            updates["soc_version"] = _optional_str(overrides["soc_version"])
+        if "image_size" in overrides and overrides["image_size"] is not None:
+            updates["image_size"] = int(overrides["image_size"])
+        if "confidence_threshold" in overrides and overrides["confidence_threshold"] is not None:
+            updates["confidence_threshold"] = float(overrides["confidence_threshold"])
+        if "iou_threshold" in overrides and overrides["iou_threshold"] is not None:
+            updates["iou_threshold"] = float(overrides["iou_threshold"])
+        if "line" in overrides and overrides["line"] is not None:
+            updates["line"] = LineConfig.from_value(overrides["line"])
         if "display" in overrides and overrides["display"] is not None:
             updates["display"] = _bool(overrides["display"])
+        if "output_video" in overrides and overrides["output_video"] is not None:
+            updates["output_video"] = _optional_str(overrides["output_video"])
         if "max_frames" in overrides and overrides["max_frames"] is not None:
             updates["max_frames"] = _optional_int(overrides["max_frames"])
         return replace(self, **updates)
