@@ -50,6 +50,39 @@ const FALLBACK_PIPELINE = [
   '前端展示结果视频或实时标注画面',
 ];
 
+const STATUS_TAGS = {
+  idle: '待命',
+  preview: '预览',
+  running: '运行',
+  stopping: '停止中',
+  completed: '完成',
+  stopped: '已停止',
+  failed: '异常',
+};
+
+const ASCII_FRAMES = [
+  String.raw`        _________
+   ____/  _   _  \____
+ _/ __ \_/ \_/ \_/ __ \_
+|__/  \___________/  \__|
+   []      |||      []`,
+  String.raw`       _________
+  ____/  _   _  \____
+_/ __ \_/ \_/ \_/ __ \_
+__/  \___________/  \__
+  []      |||      []`,
+  String.raw`      _________
+ ____/  _   _  \____
+/ __ \_/ \_/ \_/ __ \_
+_/  \___________/  \_
+ []      |||      []`,
+  String.raw`     _________
+____/  _   _  \____
+ __ \_/ \_/ \_/ __ \_
+  \___________/  \_
+[]      |||      []`,
+];
+
 async function requestJson(url, options = {}) {
   const { json, headers = {}, body, ...rest } = options;
   const finalHeaders = new Headers(headers);
@@ -560,7 +593,31 @@ function statusPresentation(status, snapshot) {
       detail: '请查看下方错误信息',
     },
   };
-  return labels[status] || { title: status || '未知状态', detail: '状态信息不可用' };
+  const label = labels[status] || { title: status || '未知状态', detail: '状态信息不可用' };
+  return {
+    tag: STATUS_TAGS[status] || '未知',
+    ...label,
+  };
+}
+
+function updateAsciiTelemetry(snapshot = state.lastStatus) {
+  const asciiVehicle = byId('asciiVehicle');
+  if (!asciiVehicle) {
+    return;
+  }
+
+  const frameSeed = Math.floor(Date.now() / 900);
+  const frame = ASCII_FRAMES[frameSeed % ASCII_FRAMES.length];
+  const frames = Number(snapshot.frames || 0);
+  const fps = Number(snapshot.fps || 0).toFixed(1);
+  const total = Number(snapshot.counts?.total || 0);
+  const status = STATUS_TAGS[snapshot.status || 'idle'] || '未知';
+  asciiVehicle.textContent = `${frame}\n\n状态 ${status}   帧 ${frames}   FPS ${fps}   总数 ${total}`;
+
+  const scanline = byId('archiveScanline');
+  if (scanline) {
+    scanline.dataset.status = snapshot.status || 'idle';
+  }
 }
 
 function renderStatus(snapshot = {}) {
@@ -581,10 +638,12 @@ function renderStatus(snapshot = {}) {
   pill.innerHTML = `
     <span class="status-pill__dot"></span>
     <div>
+      <span class="status-pill__tag">${escapeHtml(label.tag)}</span>
       <strong>${escapeHtml(label.title)}</strong>
       <small>${escapeHtml(label.detail)}</small>
     </div>
   `;
+  updateAsciiTelemetry(snapshot);
 }
 
 async function loadDashboard() {
@@ -1203,97 +1262,17 @@ function bindEvents() {
   });
 }
 
-function initParticles() {
-  const canvas = byId('particleCanvas');
-  const context = canvas.getContext('2d');
+function startAsciiTicker() {
   const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-  let animationFrame = 0;
-  let particles = [];
-
-  function resize() {
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(window.innerWidth * ratio);
-    canvas.height = Math.floor(window.innerHeight * ratio);
-    canvas.style.width = `${window.innerWidth}px`;
-    canvas.style.height = `${window.innerHeight}px`;
+  updateAsciiTelemetry();
+  if (mediaQuery.matches) {
+    return;
   }
-
-  function seed() {
-    const ratio = window.devicePixelRatio || 1;
-    const count = mediaQuery.matches ? 18 : 64;
-    particles = Array.from({ length: count }, () => ({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      vx: (Math.random() - 0.5) * 0.22 * ratio,
-      vy: (Math.random() - 0.5) * 0.14 * ratio,
-      radius: (Math.random() * 2.4 + 0.8) * ratio,
-      warm: Math.random() > 0.55,
-    }));
-  }
-
-  function drawParticle(particle) {
-    context.beginPath();
-    context.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
-    context.fillStyle = particle.warm
-      ? 'rgba(255, 178, 93, 0.52)'
-      : 'rgba(255, 211, 155, 0.36)';
-    context.fill();
-  }
-
-  function drawLinks() {
-    if (mediaQuery.matches) {
-      return;
-    }
-    for (let i = 0; i < particles.length; i += 1) {
-      for (let j = i + 1; j < particles.length; j += 1) {
-        const a = particles[i];
-        const b = particles[j];
-        const distance = Math.hypot(a.x - b.x, a.y - b.y);
-        const maxDistance = 150 * (window.devicePixelRatio || 1);
-        if (distance > maxDistance) {
-          continue;
-        }
-        context.beginPath();
-        context.moveTo(a.x, a.y);
-        context.lineTo(b.x, b.y);
-        context.strokeStyle = `rgba(255, 178, 93, ${0.18 * (1 - distance / maxDistance)})`;
-        context.lineWidth = 1;
-        context.stroke();
-      }
-    }
-  }
-
-  function tick() {
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    particles.forEach((particle) => {
-      if (!mediaQuery.matches) {
-        particle.x += particle.vx;
-        particle.y += particle.vy;
-        if (particle.x < 0 || particle.x > canvas.width) particle.vx *= -1;
-        if (particle.y < 0 || particle.y > canvas.height) particle.vy *= -1;
-      }
-      drawParticle(particle);
-    });
-    drawLinks();
-    if (!mediaQuery.matches) {
-      animationFrame = window.requestAnimationFrame(tick);
-    }
-  }
-
-  function redraw() {
-    window.cancelAnimationFrame(animationFrame);
-    resize();
-    seed();
-    tick();
-  }
-
-  redraw();
-  window.addEventListener('resize', redraw);
-  mediaQuery.addEventListener('change', redraw);
+  window.setInterval(() => updateAsciiTelemetry(), 900);
 }
 
 async function boot() {
-  initParticles();
+  startAsciiTicker();
   bindEvents();
   bindLineEditorEvents();
   syncControls();

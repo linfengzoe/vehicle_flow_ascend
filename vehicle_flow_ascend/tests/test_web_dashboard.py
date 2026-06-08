@@ -84,7 +84,8 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert (static_dir / "index.html").exists()
     assert (static_dir / "styles.css").exists()
     assert (static_dir / "app.js").exists()
-    assert "particleCanvas" in index_html
+    assert "asciiVehicle" in index_html
+    assert "archiveScanline" in index_html
     assert "videoFileInput" in index_html
     assert "cameraButton" in index_html
     assert "cameraDeviceSelect" in index_html
@@ -125,10 +126,20 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "line: lineFromEditor()" in app_js
     assert "line: lineForRealtimeCapture()" in app_js
     assert "getUserMedia" in app_js
-    assert "initParticles" in app_js
-    assert "#particleCanvas" in styles_css
+    assert "updateAsciiTelemetry" in app_js
+    assert "STATUS_TAGS" in app_js
+    assert "待命" in app_js
+    assert "预览" in app_js
+    assert "运行" in app_js
+    assert "完成" in app_js
+    assert "ONLINE" not in app_js
+    assert "PREVIEW" not in app_js
+    assert "RUNNING" not in app_js
+    assert "COMPLETE" not in app_js
+    assert "@keyframes ascii-drive" in styles_css
+    assert "@keyframes scanline-sweep" in styles_css
+    assert ".archive-shell" in styles_css
     assert "prefers-reduced-motion" in styles_css
-    assert "city-night" in styles_css
     result_media_block = styles_css.split("#realtimeStream,", 1)[1].split(".empty-state", 1)[0]
     assert "object-fit: contain;" in result_media_block
 

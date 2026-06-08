@@ -3,47 +3,82 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vehicle Flow Ascend Console</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%230b0e15'/%3E%3Cpath d='M10 40h44l-4-13H14z' fill='%23ffb25d'/%3E%3Ccircle cx='22' cy='44' r='5' fill='%230b0e15'/%3E%3Ccircle cx='43' cy='44' r='5' fill='%230b0e15'/%3E%3Cpath d='M18 23h28l-6-9H25z' fill='%23ffd39b'/%3E%3C/svg%3E" />
+  <meta name="description" content="车辆大类识别、穿线计数与昇腾边缘推理前端控制台。" />
+  <title>车辆观测档案馆</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230d0d0c'/%3E%3Cpath d='M9 43h46l-5-16H15z' fill='none' stroke='%23f1eee7' stroke-width='4'/%3E%3Cpath d='M20 27h27l-7-9H27z' fill='none' stroke='%23f1eee7' stroke-width='4'/%3E%3Ccircle cx='22' cy='45' r='5' fill='%23f1eee7'/%3E%3Ccircle cx='45' cy='45' r='5' fill='%23f1eee7'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body class="city-night">
-  <canvas id="particleCanvas" aria-hidden="true"></canvas>
-  <div class="ambient-glow" aria-hidden="true"></div>
+<body class="archive-console">
+  <a class="skip-link" href="#mainStage">跳到主屏</a>
+  <div class="archive-noise" aria-hidden="true"></div>
+  <div class="archive-grid-bg" aria-hidden="true"></div>
 
-  <main class="page-shell">
-    <section class="hero-card glass-card">
+  <header class="archive-nav" aria-label="车辆观测档案导航">
+    <div class="archive-mark">
+      <span>VEHC</span>
+      <strong>车辆观测档案馆</strong>
+    </div>
+    <div class="archive-nav__rail" aria-hidden="true">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+    <div class="archive-clock">边缘推理控制台</div>
+  </header>
+
+  <main class="archive-shell" id="mainStage">
+    <section class="hero-panel">
       <div class="hero-copy">
-        <p class="kicker">CITY-NIGHT TRAFFIC FLOW</p>
-        <h1>车辆大类识别与车流统计</h1>
+        <p class="kicker">实时检测 / 穿线计数 / 标注回放</p>
+        <h1>把道路视频整理成可回放的车辆档案</h1>
         <p>
-          上传道路视频或接入摄像头，后端完成检测、跟踪、穿线计数与标注输出。
+          前端只保留两个入口：上传本地视频，或调用浏览器摄像头。后端完成车辆检测、质心跟踪、穿线统计与标注输出。
         </p>
       </div>
+
       <div class="status-pill" id="statusPill" data-status="idle" aria-live="polite">
         <span class="status-pill__dot"></span>
         <div>
+          <span class="status-pill__tag">待命</span>
           <strong>系统待命</strong>
           <small>选择上传视频或开启摄像头</small>
         </div>
       </div>
     </section>
 
-    <section class="dashboard-grid">
-      <article class="result-panel glass-card">
+    <section class="workbench-grid" aria-label="车辆推理工作台">
+      <article class="result-panel">
         <div class="section-head">
           <div>
-            <p class="kicker">RESULT STAGE</p>
-            <h2>推理结果主屏</h2>
+            <p class="kicker">观测主屏</p>
+            <h2>推理结果</h2>
           </div>
           <button class="stop-button" id="stopButton" type="button">停止当前任务</button>
         </div>
 
         <div class="result-stage">
           <div class="empty-state" id="emptyState">
-            <span class="empty-state__halo"></span>
-            <h3>选择一个入口开始</h3>
-            <p>上传本地视频以生成结果视频，或开启浏览器摄像头进入实时车流观察。</p>
+            <div class="ascii-display" aria-hidden="true">
+              <div class="ascii-display__head">
+                <span>车辆字符扫描</span>
+                <small>动态空状态</small>
+              </div>
+              <div class="ascii-display__window">
+                <pre id="asciiVehicle">      ____        ____
+  ___/ __ \______/ __ \___
+ / _  /_/ /  __  /_/  _  \
+|____\____/__/  \____/____|</pre>
+                <span class="archive-scanline" id="archiveScanline"></span>
+              </div>
+              <div class="ascii-display__ticks">
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+            <h3>等待载入车辆档案</h3>
+            <p>上传本地视频后设置穿线，或开启浏览器摄像头进入实时观察。</p>
           </div>
 
           <img id="realtimeStream" alt="实时推理标注画面" hidden />
@@ -69,11 +104,11 @@
         </div>
       </article>
 
-      <aside class="control-panel glass-card">
-        <p class="kicker">ENTRY POINTS</p>
+      <aside class="control-panel">
+        <p class="kicker">入口</p>
         <h2>开始观测</h2>
         <p class="panel-copy">
-          选择视频批处理，或指定摄像头进入实时标注流。
+          先打开预览并设置穿线，再启动后端推理。所有工程参数继续由 YAML 配置管理。
         </p>
 
         <label class="file-field" for="videoFileInput">
@@ -95,8 +130,8 @@
         </div>
       </aside>
 
-      <aside class="metrics-panel glass-card">
-        <p class="kicker">LIVE TELEMETRY</p>
+      <aside class="metrics-panel">
+        <p class="kicker">遥测</p>
         <h2>实时状态</h2>
         <div class="telemetry-grid">
           <div>
@@ -120,13 +155,18 @@
         <p class="error-line" id="errorLine" role="alert" aria-live="assertive"></p>
       </aside>
 
-      <article class="pipeline-panel glass-card">
-        <p class="kicker">PIPELINE</p>
-        <h2>后台处理流程</h2>
+      <article class="pipeline-panel">
+        <p class="kicker">处理流程</p>
+        <h2>后台日志</h2>
         <ol id="pipelineList"></ol>
       </article>
     </section>
   </main>
+
+  <footer class="archive-footer">
+    <span>车辆观测档案馆</span>
+    <span>系统运行状态由后端实时同步</span>
+  </footer>
 
   <script src="/app.js" defer></script>
 </body>
