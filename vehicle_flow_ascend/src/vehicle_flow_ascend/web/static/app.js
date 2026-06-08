@@ -15,6 +15,7 @@ const state = {
   uploadedVideoUrl: null,
   lineEditor: {
     ready: false,
+    source: null,
     dragging: null,
     videoWidth: 0,
     videoHeight: 0,
@@ -94,11 +95,14 @@ function syncControls() {
   const stopButton = byId('stopButton');
   const busy = Boolean(state.busyAction);
   const active = ['batch', 'realtime', 'camera'].includes(state.mode);
+  const cameraPreview = state.mode === 'camera-preview';
+  const canAnalyze =
+    state.lineEditor.ready && (Boolean(state.uploadedVideo) || cameraPreview);
 
-  uploadButton.disabled = busy || active;
-  analysisStartButton.disabled = busy || active || !state.uploadedVideo || !state.lineEditor.ready;
-  cameraButton.disabled = busy || active;
-  stopButton.disabled = busy || !active;
+  uploadButton.disabled = busy || active || cameraPreview;
+  analysisStartButton.disabled = busy || active || !canAnalyze;
+  cameraButton.disabled = busy || active || cameraPreview;
+  stopButton.disabled = busy || (!active && !cameraPreview);
 }
 
 function setBusy(isBusy, action = '') {
@@ -232,6 +236,7 @@ function resetLineSetup({ clearUpload = false } = {}) {
   const preview = byId('linePreviewVideo');
   panel.hidden = true;
   preview.pause();
+  preview.srcObject = null;
   preview.removeAttribute('src');
   preview.load();
   if (clearUpload) {
@@ -240,8 +245,9 @@ function resetLineSetup({ clearUpload = false } = {}) {
     }
     state.uploadedVideoUrl = null;
     state.uploadedVideo = null;
-    state.lineEditor.ready = false;
   }
+  state.lineEditor.ready = false;
+  state.lineEditor.source = null;
   syncControls();
 }
 
@@ -307,9 +313,10 @@ function setCameraPreviewVisible(visible) {
   preview.hidden = !visible;
 }
 
-function initializeLineEditor(videoWidth, videoHeight) {
+function initializeLineEditor(videoWidth, videoHeight, source = state.lineEditor.source) {
   const editor = state.lineEditor;
   editor.ready = true;
+  editor.source = source;
   editor.dragging = null;
   editor.videoWidth = videoWidth;
   editor.videoHeight = videoHeight;
@@ -510,6 +517,10 @@ function statusPresentation(status, snapshot) {
       title: '系统待命',
       detail: '选择上传视频或开启摄像头',
     },
+    preview: {
+      title: '设置穿线',
+      detail: '拖动主屏线段后开始分析',
+    },
     running: cameraSession
       ? {
           title: '摄像头实时推理中',
@@ -692,23 +703,50 @@ function showLineSetup(fileName) {
   const panel = byId('lineSetupPanel');
   const preview = byId('linePreviewVideo');
   panel.hidden = false;
+  state.lineEditor.source = 'upload';
+  preview.srcObject = null;
   preview.src = state.uploadedVideoUrl;
-  preview.currentTime = 0;
-  preview.addEventListener(
-    'loadedmetadata',
-    () => {
-      initializeLineEditor(preview.videoWidth || 1920, preview.videoHeight || 1080);
-      resizeLineCanvas();
-      setError('');
-    },
-    { once: true },
-  );
+  armLinePreviewMetadata('upload');
   preview.load();
   updateEmptyState('设置穿线位置', fileName || '拖动主屏线段两端后开始分析。');
 }
 
+function showCameraLineSetup(stream) {
+  nextViewToken();
+  resetResultVideo();
+  resetRealtimeStream();
+  byId('emptyState').hidden = true;
+  const panel = byId('lineSetupPanel');
+  const preview = byId('linePreviewVideo');
+  panel.hidden = false;
+  state.lineEditor.source = 'camera';
+  preview.removeAttribute('src');
+  preview.srcObject = stream;
+  armLinePreviewMetadata('camera');
+  preview.play().catch(() => {});
+  updateEmptyState('设置摄像头穿线', '拖动主屏线段两端后开始实时分析。');
+}
+
+function armLinePreviewMetadata(source) {
+  const preview = byId('linePreviewVideo');
+  const initialize = () => {
+    initializeLineEditor(preview.videoWidth || 1920, preview.videoHeight || 1080, source);
+    resizeLineCanvas();
+    setError('');
+  };
+  if (preview.videoWidth && preview.videoHeight) {
+    initialize();
+    return;
+  }
+  preview.addEventListener('loadedmetadata', initialize, { once: true });
+}
+
 async function startAnalysisFlow() {
   setError('');
+  if (state.mode === 'camera-preview') {
+    await startCameraAnalysisFlow();
+    return;
+  }
   if (!state.uploadedVideo?.path) {
     setError('请先上传视频并设置穿线位置。');
     return;
@@ -950,11 +988,12 @@ function startRealtimePolling() {
   }, 1000);
 }
 
-async function startCameraFlow() {
+async function startCameraPreviewFlow() {
   setError('');
   nextViewToken();
   resetResultVideo();
   resetRealtimeStream();
+  resetLineSetup();
   setBusy(true, 'camera');
   let stream;
 
@@ -981,12 +1020,46 @@ async function startCameraFlow() {
     });
     refreshCameraDevices().catch(() => {});
 
-    const started = await requestJson('/api/realtime/start', { method: 'POST', json: {} });
-    state.realtimeSessionId = started.session_id;
     state.cameraStream = stream;
+    setMode('camera-preview');
+    renderStatus({ status: 'preview', counts: { total: 0 }, frames: 0, fps: 0 });
+    showCameraLineSetup(stream);
+  } catch (error) {
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      state.cameraStream = null;
+    }
+
+    setMode('idle');
+    setError(error.message);
+    showEmptyState(
+      '无法开启摄像头',
+      '请确认浏览器已获得摄像头权限，然后重试。',
+    );
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function startCameraAnalysisFlow() {
+  setError('');
+  if (!state.cameraStream) {
+    setError('请先开启摄像头预览并设置穿线位置。');
+    return;
+  }
+
+  setBusy(true, 'analysis');
+  try {
+    const started = await requestJson('/api/realtime/start', {
+      method: 'POST',
+      json: {
+        line: lineFromEditor(),
+      },
+    });
+    state.realtimeSessionId = started.session_id;
 
     const preview = byId('cameraPreview');
-    preview.srcObject = stream;
+    preview.srcObject = state.cameraStream;
     setCameraPreviewVisible(true);
     await preview.play().catch(() => {});
 
@@ -1000,21 +1073,16 @@ async function startCameraFlow() {
     let backendStopped = true;
     if (sessionId) {
       backendStopped = await stopRealtimeSession(true);
-    } else if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      state.cameraStream = null;
-      setMode('idle');
     }
-
     setError(
       backendStopped
         ? error.message
         : `${error.message} 后端实时会话可能仍在运行，请点击停止后重试。`,
     );
     showEmptyState(
-      backendStopped ? '无法开启摄像头' : '摄像头启动未完成',
+      backendStopped ? '无法开始实时分析' : '摄像头启动未完成',
       backendStopped
-        ? '请确认浏览器已获得摄像头权限，然后重试。'
+        ? '请确认穿线位置有效，然后重试。'
         : '本地启动失败，且后端实时会话停止请求失败；请点击停止清理会话。',
     );
   } finally {
@@ -1027,6 +1095,14 @@ async function stopActiveFlow() {
   setBusy(true, 'stop');
 
   try {
+    if (state.mode === 'camera-preview') {
+      stopLocalTracks();
+      resetLineSetup();
+      setMode('idle');
+      showEmptyState('摄像头预览已关闭', '本地摄像头已释放，可重新选择视频或开启摄像头。');
+      return;
+    }
+
     if (state.mode === 'camera' || state.mode === 'realtime' || state.realtimeSessionId) {
       const stopped = await stopRealtimeSession(true);
       if (stopped) {
@@ -1079,7 +1155,7 @@ function bindEvents() {
     startAnalysisFlow().catch((error) => setError(error.message));
   });
   byId('cameraButton').addEventListener('click', () => {
-    startCameraFlow().catch((error) => setError(error.message));
+    startCameraPreviewFlow().catch((error) => setError(error.message));
   });
   byId('stopButton').addEventListener('click', () => {
     stopActiveFlow().catch((error) => setError(error.message));

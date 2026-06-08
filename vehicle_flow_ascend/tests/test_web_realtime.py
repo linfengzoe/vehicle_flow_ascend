@@ -69,6 +69,23 @@ def test_realtime_manager_processes_jpeg_frame(monkeypatch) -> None:
     assert output.startswith(b"\xff\xd8")
 
 
+def test_realtime_manager_applies_line_override_on_start(monkeypatch) -> None:
+    captured_lines = []
+
+    def fake_create_detector(config):
+        captured_lines.append(config.line.as_list())
+        return FakeDetector()
+
+    monkeypatch.setattr(realtime, "create_detector", fake_create_detector)
+    config = VehicleFlowConfig(line=LineConfig(start=(0, 12), end=(32, 12)))
+    manager = RealtimeInferenceManager(config)
+
+    started = manager.start({"line": [[5, 6], [28, 18]]})
+
+    assert started["status"] == "running"
+    assert captured_lines == [[[5, 6], [28, 18]]]
+
+
 def test_realtime_manager_rejects_duplicate_session(monkeypatch) -> None:
     monkeypatch.setattr(realtime, "create_detector", lambda config: FakeDetector())
     manager = RealtimeInferenceManager(VehicleFlowConfig())

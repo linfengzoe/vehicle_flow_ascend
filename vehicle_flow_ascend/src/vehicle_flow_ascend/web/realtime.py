@@ -3,14 +3,14 @@ from __future__ import annotations
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import cv2
 import numpy as np
 
 from vehicle_flow_ascend.app import FrameProcessor
-from vehicle_flow_ascend.config import VehicleFlowConfig
+from vehicle_flow_ascend.config import LineConfig, VehicleFlowConfig
 from vehicle_flow_ascend.detectors.base import Detector, create_detector
 
 
@@ -68,7 +68,7 @@ class RealtimeInferenceManager:
         self._release_after_inflight = False
         self._reaper_thread: threading.Thread | None = None
 
-    def start(self) -> dict[str, Any]:
+    def start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         with self._condition:
             self._expire_idle_session_locked()
             if self._state.status == "running":
@@ -76,9 +76,13 @@ class RealtimeInferenceManager:
             if self._inflight_frames:
                 raise RuntimeError("realtime inference session is still stopping")
 
-            detector = create_detector(self._base_config)
+            session_config = replace(
+                self._base_config,
+                line=_line_from_payload(payload or {}, self._base_config.line),
+            )
+            detector = create_detector(session_config)
             self._detector = detector
-            self._processor = FrameProcessor(self._base_config, detector)
+            self._processor = FrameProcessor(session_config, detector)
             self._latest_jpeg = None
             self._last_activity_at = time.monotonic()
             self._release_after_inflight = False
@@ -279,3 +283,10 @@ def _encode_jpeg(frame_bgr) -> bytes:
     if not ok:
         raise ValueError("failed to encode jpeg frame")
     return encoded.tobytes()
+
+
+def _line_from_payload(payload: dict[str, Any], default_line: LineConfig) -> LineConfig:
+    value = payload.get("line")
+    if value is None:
+        return default_line
+    return LineConfig.from_value(value)

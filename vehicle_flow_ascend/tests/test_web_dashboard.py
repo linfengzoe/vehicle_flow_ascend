@@ -115,6 +115,9 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "initializeLineEditor" in app_js
     assert "lineFromEditor" in app_js
     assert "showInferenceStream" in app_js
+    assert "startCameraPreviewFlow" in app_js
+    assert "startCameraAnalysisFlow" in app_js
+    assert "camera-preview" in app_js
     assert "/api/inference/stream" in app_js
     assert "line: lineFromEditor()" in app_js
     assert "getUserMedia" in app_js

@@ -149,7 +149,7 @@ def _make_handler(
 
         def _handle_realtime_start(self) -> None:
             try:
-                self._send_json(realtime_manager.start())
+                self._send_json(realtime_manager.start(self._read_json()))
             except RuntimeError as exc:
                 self._send_json({"error": str(exc)}, status=409)
             except Exception as exc:  # noqa: BLE001 - surface startup issue to UI
