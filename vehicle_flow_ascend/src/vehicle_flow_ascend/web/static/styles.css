@@ -389,7 +389,7 @@ h3 {
 .empty-state {
   position: relative;
   z-index: 1;
-  width: min(680px, calc(100% - 38px));
+  width: min(930px, calc(100% - 38px));
   display: grid;
   gap: 18px;
   padding: 0;
@@ -413,7 +413,7 @@ h3 {
 
 .ascii-display__window {
   position: relative;
-  min-height: 246px;
+  min-height: 430px;
   overflow: hidden;
   display: grid;
   place-items: center;
@@ -422,15 +422,37 @@ h3 {
     linear-gradient(180deg, rgba(241, 238, 231, 0.03), transparent);
 }
 
-#asciiVehicle {
-  position: relative;
+#particleVehicleCanvas {
+  position: absolute;
+  inset: 0;
   z-index: 1;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+#particleVehicleCanvas:active,
+#particleVehicleCanvas.is-dragging {
+  cursor: grabbing;
+}
+
+#asciiVehicle {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 14px;
+  z-index: 2;
   margin: 0;
-  color: var(--ink);
+  padding: 8px 10px;
+  border-top: 1px solid rgba(241, 238, 231, 0.14);
+  color: rgba(241, 238, 231, 0.72);
+  background: linear-gradient(90deg, rgba(13, 13, 12, 0.78), rgba(13, 13, 12, 0.18));
   font-family: var(--mono);
-  font-size: 0.9rem;
-  line-height: 1.22;
+  font-size: 0.72rem;
+  line-height: 1.35;
   white-space: pre;
+  pointer-events: none;
   text-shadow: 0 0 18px rgba(241, 238, 231, 0.18);
   animation: ascii-drive 2.8s steps(4, end) infinite;
 }
@@ -441,10 +463,12 @@ h3 {
   right: 0;
   top: -28%;
   height: 26%;
+  z-index: 3;
   background:
     linear-gradient(180deg, transparent, rgba(241, 238, 231, 0.2), transparent),
     repeating-linear-gradient(90deg, transparent 0 9px, rgba(241, 238, 231, 0.22) 9px 10px);
   opacity: 0.78;
+  pointer-events: none;
   animation: scanline-sweep 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }
 
@@ -895,7 +919,7 @@ h3 {
   }
 
   .ascii-display__window {
-    min-height: 210px;
+    min-height: 300px;
   }
 
   #asciiVehicle {

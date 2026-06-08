@@ -60,28 +60,91 @@ const STATUS_TAGS = {
   failed: '异常',
 };
 
-const ASCII_FRAMES = [
-  String.raw`        _________
-   ____/  _   _  \____
- _/ __ \_/ \_/ \_/ __ \_
-|__/  \___________/  \__|
-   []      |||      []`,
-  String.raw`       _________
-  ____/  _   _  \____
-_/ __ \_/ \_/ \_/ __ \_
-__/  \___________/  \__
-  []      |||      []`,
-  String.raw`      _________
- ____/  _   _  \____
-/ __ \_/ \_/ \_/ __ \_
-_/  \___________/  \_
- []      |||      []`,
-  String.raw`     _________
-____/  _   _  \____
- __ \_/ \_/ \_/ __ \_
-  \___________/  \_
-[]      |||      []`,
-];
+const CAR_CHARS =
+  " `.-':_,^=;><+!rc*/z?sLTv)J7(|Fi{C}fI31tlu[neoZ5Yxjya]2ESwqkP6h9d4VpOGbUAKXHm8RD#$Bg0MNWQ%&@";
+const FIELD_CHARS = '  ..::--==++**##@@'.split('');
+
+const vehicleParticleState = {
+  canvas: null,
+  context: null,
+  mediaQuery: null,
+  animationFrame: 0,
+  width: 0,
+  height: 0,
+  cols: 0,
+  rows: 0,
+  time: 0,
+  mouse: { x: -1000, y: -1000 },
+  dragging: false,
+  dragStart: { x: 0, y: 0 },
+  dragOrigin: { x: 0, y: 0 },
+  currentOffset: { x: 0, y: 0 },
+  targetOffset: { x: 0, y: 0 },
+};
+
+function hashNoise(x, y) {
+  const value = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+  return value - Math.floor(value);
+}
+
+function smoothNoise(t) {
+  return t * t * (3 - 2 * t);
+}
+
+function noise2D(x, y) {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const a = hashNoise(ix, iy);
+  const b = hashNoise(ix + 1, iy);
+  const c = hashNoise(ix, iy + 1);
+  const d = hashNoise(ix + 1, iy + 1);
+  const ux = smoothNoise(fx);
+  const uy = smoothNoise(fy);
+  return (
+    a * (1 - ux) * (1 - uy) +
+    b * ux * (1 - uy) +
+    c * (1 - ux) * uy +
+    d * ux * uy
+  );
+}
+
+function sdRoundedRect(px, py, bx, by, radius) {
+  const dx = Math.abs(px) - bx + radius;
+  const dy = Math.abs(py) - by + radius;
+  return (
+    Math.min(Math.max(dx, dy), 0) +
+    Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) -
+    radius
+  );
+}
+
+function sdCircle(px, py, radius) {
+  return Math.hypot(px, py) - radius;
+}
+
+function sdfUnion(a, b) {
+  return Math.min(a, b);
+}
+
+function sdfSmoothUnion(a, b, k) {
+  const h = clamp(0.5 + (0.5 * (b - a)) / k, 0, 1);
+  return b + (a - b) * h;
+}
+
+function sdCar(px, py) {
+  const body = sdRoundedRect(px, py + 0.15, 1.35, 0.38, 0.12);
+  const cabin = sdRoundedRect(px - 0.18, py - 0.38, 0.72, 0.32, 0.08);
+  let carBody = sdfSmoothUnion(body, cabin, 0.15);
+  const wheelLeft = sdCircle(px + 0.72, py + 0.38, 0.28);
+  const wheelRight = sdCircle(px - 0.62, py + 0.38, 0.28);
+  carBody = Math.max(carBody, -wheelLeft);
+  carBody = Math.max(carBody, -wheelRight);
+  const tireLeft = sdCircle(px + 0.72, py + 0.38, 0.2);
+  const tireRight = sdCircle(px - 0.62, py + 0.38, 0.2);
+  return sdfUnion(carBody, sdfUnion(tireLeft, tireRight));
+}
 
 async function requestJson(url, options = {}) {
   const { json, headers = {}, body, ...rest } = options;
@@ -292,6 +355,10 @@ function showEmptyState(title, description) {
   resetLineSetup();
   updateEmptyState(title, description);
   byId('emptyState').hidden = false;
+  window.requestAnimationFrame(() => {
+    resizeParticleVehicle();
+    restartParticleVehicleField();
+  });
 }
 
 function showRealtimeStream(sessionId) {
@@ -606,18 +673,260 @@ function updateAsciiTelemetry(snapshot = state.lastStatus) {
     return;
   }
 
-  const frameSeed = Math.floor(Date.now() / 900);
-  const frame = ASCII_FRAMES[frameSeed % ASCII_FRAMES.length];
   const frames = Number(snapshot.frames || 0);
   const fps = Number(snapshot.fps || 0).toFixed(1);
   const total = Number(snapshot.counts?.total || 0);
   const status = STATUS_TAGS[snapshot.status || 'idle'] || '未知';
-  asciiVehicle.textContent = `${frame}\n\n状态 ${status}   帧 ${frames}   FPS ${fps}   总数 ${total}`;
+  asciiVehicle.textContent = `状态 ${status}   帧 ${frames}   FPS ${fps}   总数 ${total}`;
 
   const scanline = byId('archiveScanline');
   if (scanline) {
     scanline.dataset.status = snapshot.status || 'idle';
   }
+}
+
+function resizeParticleVehicle() {
+  const particleState = vehicleParticleState;
+  const { canvas, context } = particleState;
+  if (!canvas || !context) {
+    return;
+  }
+
+  const host = canvas.parentElement || canvas;
+  const width = Math.max(1, Math.round(host.clientWidth));
+  const height = Math.max(1, Math.round(host.clientHeight));
+  const ratio = window.devicePixelRatio || 1;
+  particleState.width = width;
+  particleState.height = height;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  particleState.cols = width < 768 ? 90 : 128;
+  const cellWidth = width / particleState.cols;
+  particleState.rows = Math.ceil(height / (cellWidth * 1.18));
+}
+
+function drawParticleVehicleField(_timestamp = 0, scheduleNext = true) {
+  const particleState = vehicleParticleState;
+  const { context, width, height, cols, rows } = particleState;
+  if (!context || width <= 1 || height <= 1 || cols <= 0 || rows <= 0) {
+    return;
+  }
+
+  context.fillStyle = '#0a0a0a';
+  context.fillRect(0, 0, width, height);
+  particleState.time += 0.012;
+
+  particleState.currentOffset.x +=
+    (particleState.targetOffset.x - particleState.currentOffset.x) * 0.11;
+  particleState.currentOffset.y +=
+    (particleState.targetOffset.y - particleState.currentOffset.y) * 0.11;
+
+  const cellWidth = width / cols;
+  const cellHeight = cellWidth * 1.18;
+  const carX = width * 0.5 + particleState.currentOffset.x;
+  const carY = height * 0.5 + particleState.currentOffset.y;
+  const carScale = Math.min(width, height) * 0.25;
+
+  context.font = `${cellHeight * 0.84}px "Cascadia Mono", "JetBrains Mono", monospace`;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+
+  let lightX = 1;
+  let lightY = 0.25;
+  let lightZ = 0.55;
+  const lightLength = Math.hypot(lightX, lightY, lightZ);
+  lightX /= lightLength;
+  lightY /= lightLength;
+  lightZ /= lightLength;
+
+  for (let row = 0; row < rows; row += 1) {
+    const rowY = row * cellHeight + cellHeight / 2;
+    const laneNorm = rowY / height;
+    const laneSpeed = 1.75;
+
+    for (let column = 0; column < cols; column += 1) {
+      const x = column * cellWidth + cellWidth / 2;
+      const y = rowY;
+      const localX = (x - carX) / carScale;
+      const localY = -(y - carY) / carScale;
+      const distCar = sdCar(localX, localY);
+      const dxCar = x - carX;
+      const dyCar = y - carY;
+      const angleCar = Math.atan2(dyCar, dxCar);
+      const mouseDistance = Math.hypot(x - particleState.mouse.x, y - particleState.mouse.y);
+      const mouseField = Math.exp(-mouseDistance * 0.0038);
+
+      let char = '';
+      let opacity = 0;
+      let drawX = x;
+      let drawY = y;
+
+      if (distCar < 0) {
+        const eps = 0.02;
+        const dx = sdCar(localX + eps, localY) - sdCar(localX - eps, localY);
+        const dy = sdCar(localX, localY + eps) - sdCar(localX, localY - eps);
+        const nz = 1;
+        const normalLength = Math.hypot(dx, dy, nz * 2 * eps);
+        const nx = dx / normalLength;
+        const ny = dy / normalLength;
+        const nnz = (nz * 2 * eps) / normalLength;
+
+        let diffuse = nx * lightX + ny * lightY + nnz * lightZ;
+        diffuse = Math.max(0, diffuse);
+        const grain =
+          noise2D(localX * 8 + 3.1, localY * 8 - 2.4) * 0.5 +
+          noise2D(localX * 18 - 7.2, localY * 18 + 5.8) * 0.35;
+        const panelLines =
+          Math.abs(localX - 0.15) < 0.02 ||
+          Math.abs(localX + 0.35) < 0.02 ||
+          (localY > -0.15 && localY < -0.1)
+            ? 0.15
+            : 0;
+        const albedo = clamp(0.72 + grain * 0.12 - panelLines, 0.48, 0.88);
+
+        if (diffuse > 0 && diffuse < 0.12) {
+          diffuse += Math.sin(localX * 60 + localY * 60) * 0.025;
+          diffuse = Math.max(0, diffuse);
+        }
+
+        const intensity = 0.018 + diffuse * albedo * 1.35;
+        const carIndex = clamp(
+          Math.floor(intensity * (CAR_CHARS.length - 1)),
+          0,
+          CAR_CHARS.length - 1,
+        );
+        char = CAR_CHARS[carIndex];
+        opacity = clamp(0.2 + intensity * 0.82, 0.2, 1);
+        drawX += Math.sin(particleState.time * 3.6 + row * 0.32 + column * 0.11) * mouseField * 14;
+        drawY += Math.cos(particleState.time * 2.8 + column * 0.24) * mouseField * 4;
+      } else {
+        const sampleX =
+          column * 0.085 -
+          particleState.time * (1.8 + laneSpeed * 1.6) +
+          Math.sin(particleState.time * 4.2 + row * 0.28 + column * 0.08) *
+            mouseField *
+            1.8;
+        const sampleY =
+          row * 0.11 +
+          Math.sin(column * 0.025 + particleState.time * 1.2) * 0.6 +
+          Math.cos(particleState.time * 3.4 + column * 0.2) * mouseField * 1.1;
+        const flowA = noise2D(sampleX, sampleY);
+        const flowB = noise2D(sampleX * 1.7 + 20, sampleY * 0.8 - 14);
+        const wave =
+          Math.sin(sampleX * 1.9 + laneNorm * 14) * 0.5 +
+          Math.cos(sampleY * 2.4 - particleState.time * 2.1) * 0.5;
+        let density = flowA * 0.42 + flowB * 0.28 + (wave * 0.5 + 0.5) * 0.3;
+        const flowBand = Math.exp(-((distCar * 3.5) ** 2));
+        density += flowBand * 0.18;
+
+        if (density > 0.38) {
+          const fieldIndex = clamp(
+            Math.floor(density * (FIELD_CHARS.length - 1)),
+            0,
+            FIELD_CHARS.length - 1,
+          );
+          char = FIELD_CHARS[fieldIndex];
+          opacity = 0.035 + density * 0.24;
+          drawX += (laneSpeed * 8 + flowB * 16) % (cellWidth * 3);
+          drawY += Math.sin(sampleX * 2.2 + particleState.time + laneNorm * 8) * 1.8;
+          drawX += -Math.sin(angleCar) * flowBand * 10;
+          drawY += Math.cos(angleCar) * flowBand * 6;
+          drawX += Math.sin(particleState.time * 4.8 + row * 0.35 + column * 0.1) * mouseField * 18;
+          drawY += Math.cos(particleState.time * 3.2 + column * 0.25) * mouseField * 6;
+        }
+      }
+
+      if (!char || opacity <= 0.02) {
+        continue;
+      }
+      context.fillStyle = `rgba(232, 230, 224, ${opacity})`;
+      context.fillText(char, drawX, drawY);
+    }
+  }
+
+  if (scheduleNext && !particleState.mediaQuery?.matches) {
+    particleState.animationFrame = window.requestAnimationFrame(drawParticleVehicleField);
+  }
+}
+
+function restartParticleVehicleField() {
+  const particleState = vehicleParticleState;
+  window.cancelAnimationFrame(particleState.animationFrame);
+  drawParticleVehicleField();
+}
+
+function bindParticleVehicleEvents(canvas) {
+  if (canvas.dataset.particleEventsBound === 'true') {
+    return;
+  }
+  canvas.dataset.particleEventsBound = 'true';
+
+  const updateMouse = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    vehicleParticleState.mouse = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  };
+
+  canvas.addEventListener('pointerdown', (event) => {
+    updateMouse(event);
+    vehicleParticleState.dragging = true;
+    vehicleParticleState.dragStart = { x: event.clientX, y: event.clientY };
+    vehicleParticleState.dragOrigin = { ...vehicleParticleState.currentOffset };
+    canvas.classList.add('is-dragging');
+    try {
+      canvas.setPointerCapture(event.pointerId);
+    } catch {
+      // Browser automation may fire synthetic pointer events without capture ownership.
+    }
+  });
+
+  canvas.addEventListener('pointermove', (event) => {
+    updateMouse(event);
+    if (!vehicleParticleState.dragging) {
+      return;
+    }
+    vehicleParticleState.targetOffset = {
+      x: vehicleParticleState.dragOrigin.x + event.clientX - vehicleParticleState.dragStart.x,
+      y: vehicleParticleState.dragOrigin.y + event.clientY - vehicleParticleState.dragStart.y,
+    };
+    drawParticleVehicleField(0, false);
+  });
+
+  const endDrag = () => {
+    vehicleParticleState.dragging = false;
+    vehicleParticleState.targetOffset = { x: 0, y: 0 };
+    canvas.classList.remove('is-dragging');
+  };
+
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('pointerleave', (event) => {
+    updateMouse(event);
+    if (vehicleParticleState.dragging) {
+      endDrag();
+    }
+  });
+}
+
+function initParticleVehicleField() {
+  const canvas = byId('particleVehicleCanvas');
+  if (!canvas) {
+    return;
+  }
+  vehicleParticleState.canvas = canvas;
+  vehicleParticleState.context = canvas.getContext('2d');
+  vehicleParticleState.mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  bindParticleVehicleEvents(canvas);
+  resizeParticleVehicle();
+  restartParticleVehicleField();
+  window.addEventListener('resize', () => {
+    resizeParticleVehicle();
+    restartParticleVehicleField();
+  });
+  vehicleParticleState.mediaQuery.addEventListener('change', restartParticleVehicleField);
 }
 
 function renderStatus(snapshot = {}) {
@@ -1272,6 +1581,7 @@ function startAsciiTicker() {
 }
 
 async function boot() {
+  initParticleVehicleField();
   startAsciiTicker();
   bindEvents();
   bindLineEditorEvents();
