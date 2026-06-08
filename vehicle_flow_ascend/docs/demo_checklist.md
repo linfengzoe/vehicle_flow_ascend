@@ -23,7 +23,8 @@ python -m pytest .\tests -q
 python -m vehicle_flow_ascend --config configs/pc_demo.yaml --dry-run
 ```
 
-- [ ] 如果演示昇腾端，`configs/ascend_om.yaml` 中的 `soc_version` 与实际开发板一致。
+- [ ] 如果演示昇腾端，开发板型号为 Atlas 200I DK A2，且 `configs/ascend_om.yaml` 中的 `soc_version` 为 `Ascend310B4` 或已按实际 CANN/ATC 支持值调整。
+- [ ] 如果演示昇腾端，PC 能通过网线直连访问 `192.168.137.100`。
 
 ## 2. PC 端模型和视频
 
@@ -68,6 +69,9 @@ python -m vehicle_flow_ascend --config configs/pc_demo.yaml --source data/demo.m
 
 如需演示昇腾开发板：
 
+- [ ] 已按课程资料页确认默认登录信息：`root / Mind@123` 或 `HwHiAiUser / Mind@123`。
+- [ ] 已使用 `ssh HwHiAiUser@192.168.137.100` 或 `ssh root@192.168.137.100` 登录过开发板。
+- [ ] 项目已放在 `/home/HwHiAiUser/vehicle_flow_ascend/`，并包含 `pyproject.toml`、`README.md`、`src/`、`configs/`、`scripts/`、`data/demo.mp4` 和 `models/yolov5n.om`。
 - [ ] 已激活 CANN 环境：
 
 ```bash
@@ -77,12 +81,18 @@ source /usr/local/Ascend/ascend-toolkit/set_env.sh
 - [ ] 已导出 ONNX：`models/yolov5n.onnx`。
 - [ ] 已转换 OM：`models/yolov5n.om`。
 - [ ] 已复制 `data/demo.mp4` 到开发板。
-- [ ] 已确认 `configs/ascend_om.yaml` 的 `model_path`、`source`、`soc_version` 正确。
+- [ ] 已确认 `configs/ascend_om.yaml` 的 `model_path`、`source`、`soc_version` 正确，其中 Atlas 200I DK A2 默认使用 `Ascend310B4`。
 - [ ] 可运行：
 
 ```bash
 python -m vehicle_flow_ascend --config configs/ascend_om.yaml
 ```
+
+如果要展示板端 USB 摄像头，而不是 PC 浏览器摄像头：
+
+- [ ] 已确认 USB 摄像头接在开发板上；
+- [ ] 已用 `root` 运行，或已为 `HwHiAiUser` 配好摄像头设备权限；
+- [ ] 已先用 `data/demo.mp4` 验证 OM 推理稳定，再把 `source` 改为 `0`。
 
 ## 6. 答辩材料截图/录屏
 

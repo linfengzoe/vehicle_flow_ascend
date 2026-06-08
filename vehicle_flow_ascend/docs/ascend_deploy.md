@@ -2,6 +2,17 @@
 
 本文档用于将 PC 端 YOLOv5 车辆检测模型导出为 ONNX，再转换为昇腾 OM，并在开发板上运行车流统计演示。
 
+## 0. Atlas 200I DK A2 核对信息
+
+按课程资料页 [熟悉昇腾开发板-260428](https://tnt.gdvzz.com/ailab/aidk260428.html)，本项目对应的开发板为 Atlas 200I DK A2。部署前先核对以下信息：
+
+- 开发板默认直连 IP 为 `192.168.137.100`。PC 与开发板通过网线直连后，先用 `ping 192.168.137.100` 确认连通；
+- 默认 SSH 账号为 `root / Mind@123` 和 `HwHiAiUser / Mind@123`。普通项目文件建议放在 `/home/HwHiAiUser/vehicle_flow_ascend/`；
+- 资料页登录欢迎信息显示系统基于 Ubuntu 22.04 LTS，架构为 `aarch64`；
+- 当前项目的 `configs/ascend_om.yaml` 和 `scripts/convert_onnx_to_om.sh` 默认使用 `Ascend310B4`。如果 ATC 转换报 `soc_version` 不支持，以当前 CANN/ATC 版本实际支持值为准；
+- 如需使用板端预置 Jupyter Lab，可登录开发板后进入 `/home/HwHiAiUser/samples/notebooks`，执行 `./start_notebook.sh 192.168.137.100`，再在 PC 浏览器打开终端输出的 `http://192.168.137.100:8888/lab?...` 地址；
+- 资料页说明预置摄像头样例需要 `root` 才能访问摄像头。本项目若在开发板上用 USB 摄像头和 OpenCV `source: 0`，需要用 `root` 运行或额外配置设备权限；Web Dashboard 的“开启摄像头”调用的是 PC 浏览器摄像头，不等同于开发板 USB 摄像头输入。
+
 ## 1. 准备目录
 
 建议开发板端目录：
@@ -12,6 +23,8 @@
 
 需要复制到开发板的内容：
 
+- `pyproject.toml`
+- `README.md`
 - `src/`
 - `configs/ascend_om.yaml`
 - `scripts/export_yolov5_to_onnx.sh`

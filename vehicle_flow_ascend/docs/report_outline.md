@@ -132,7 +132,7 @@
 | Python 版本 | 3.10+ |
 | 检测模型 | YOLOv5n |
 | 输入尺寸 | 640x640 |
-| 昇腾设备 | 根据实际填写，如 Atlas 200I DK A2 |
+| 昇腾设备 | Atlas 200I DK A2 |
 | CANN 版本 | 根据实际填写 |
 
 ### 6.2 检测效果
@@ -192,6 +192,7 @@ python -m vehicle_flow_ascend --config configs/ascend_om.yaml
 ### 7.3 部署注意事项
 
 - `soc_version` 要与开发板一致；
+- 本项目按 Atlas 200I DK A2 默认使用 `Ascend310B4`；
 - ONNX 输入尺寸固定；
 - 注意 BGR/RGB 转换；
 - 注意 letterbox 坐标还原；
