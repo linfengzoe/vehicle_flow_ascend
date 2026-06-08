@@ -11,6 +11,18 @@ const state = {
   realtimeSessionId: null,
   cameraStream: null,
   cameraDevices: [],
+  uploadedVideo: null,
+  uploadedVideoUrl: null,
+  lineEditor: {
+    ready: false,
+    dragging: null,
+    videoWidth: 0,
+    videoHeight: 0,
+    points: [
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
+    ],
+  },
   lastOutputVideo: null,
   lastStatus: { status: 'idle', counts: { total: 0 }, frames: 0, fps: 0 },
   viewToken: 0,
@@ -67,7 +79,7 @@ async function requestJson(url, options = {}) {
 }
 
 function rememberButtonLabels() {
-  ['uploadVideoButton', 'cameraButton', 'stopButton'].forEach((id) => {
+  ['uploadVideoButton', 'analysisStartButton', 'cameraButton', 'stopButton'].forEach((id) => {
     const button = byId(id);
     if (button && !button.dataset.label) {
       button.dataset.label = button.textContent.trim();
@@ -77,12 +89,14 @@ function rememberButtonLabels() {
 
 function syncControls() {
   const uploadButton = byId('uploadVideoButton');
+  const analysisStartButton = byId('analysisStartButton');
   const cameraButton = byId('cameraButton');
   const stopButton = byId('stopButton');
   const busy = Boolean(state.busyAction);
-  const active = ['batch', 'realtime', 'upload', 'camera'].includes(state.mode);
+  const active = ['batch', 'realtime', 'camera'].includes(state.mode);
 
   uploadButton.disabled = busy || active;
+  analysisStartButton.disabled = busy || active || !state.uploadedVideo || !state.lineEditor.ready;
   cameraButton.disabled = busy || active;
   stopButton.disabled = busy || !active;
 }
@@ -91,6 +105,7 @@ function setBusy(isBusy, action = '') {
   rememberButtonLabels();
   const buttons = {
     upload: byId('uploadVideoButton'),
+    analysis: byId('analysisStartButton'),
     camera: byId('cameraButton'),
     stop: byId('stopButton'),
   };
@@ -104,6 +119,7 @@ function setBusy(isBusy, action = '') {
   state.busyAction = isBusy ? action : null;
   if (isBusy) {
     if (action === 'upload') buttons.upload.textContent = '上传中...';
+    if (action === 'analysis') buttons.analysis.textContent = '启动中...';
     if (action === 'camera') buttons.camera.textContent = '连接中...';
     if (action === 'stop') buttons.stop.textContent = '停止中...';
   }
@@ -211,10 +227,29 @@ function resetRealtimeStream() {
   realtimeStream.removeAttribute('src');
 }
 
+function resetLineSetup({ clearUpload = false } = {}) {
+  const panel = byId('lineSetupPanel');
+  const preview = byId('linePreviewVideo');
+  panel.hidden = true;
+  preview.pause();
+  preview.removeAttribute('src');
+  preview.load();
+  if (clearUpload) {
+    if (state.uploadedVideoUrl) {
+      URL.revokeObjectURL(state.uploadedVideoUrl);
+    }
+    state.uploadedVideoUrl = null;
+    state.uploadedVideo = null;
+    state.lineEditor.ready = false;
+  }
+  syncControls();
+}
+
 function showEmptyState(title, description) {
   nextViewToken();
   resetResultVideo();
   resetRealtimeStream();
+  resetLineSetup();
   updateEmptyState(title, description);
   byId('emptyState').hidden = false;
 }
@@ -222,10 +257,21 @@ function showEmptyState(title, description) {
 function showRealtimeStream(sessionId) {
   nextViewToken();
   resetResultVideo();
+  resetLineSetup();
   const realtimeStream = byId('realtimeStream');
   byId('emptyState').hidden = true;
   realtimeStream.hidden = false;
   realtimeStream.src = `/api/realtime/stream?session_id=${encodeURIComponent(sessionId)}&t=${Date.now()}`;
+}
+
+function showInferenceStream(taskId) {
+  nextViewToken();
+  resetResultVideo();
+  resetLineSetup();
+  const realtimeStream = byId('realtimeStream');
+  byId('emptyState').hidden = true;
+  realtimeStream.hidden = false;
+  realtimeStream.src = `/api/inference/stream?task_id=${encodeURIComponent(taskId)}&t=${Date.now()}`;
 }
 
 async function showResultVideo(outputPath, token = nextViewToken()) {
@@ -246,6 +292,7 @@ async function showResultVideo(outputPath, token = nextViewToken()) {
   const resultVideo = byId('resultVideo');
   resetResultVideo();
   resetRealtimeStream();
+  resetLineSetup();
   byId('emptyState').hidden = true;
   resultVideo.hidden = false;
   resultVideo.src = `/media/output-video?path=${encodeURIComponent(outputPath)}&t=${Date.now()}`;
@@ -258,6 +305,182 @@ function setCameraPreviewVisible(visible) {
   const preview = byId('cameraPreview');
   dock.hidden = !visible;
   preview.hidden = !visible;
+}
+
+function initializeLineEditor(videoWidth, videoHeight) {
+  const editor = state.lineEditor;
+  editor.ready = true;
+  editor.dragging = null;
+  editor.videoWidth = videoWidth;
+  editor.videoHeight = videoHeight;
+  const y = Math.round(videoHeight * 0.78);
+  editor.points = [
+    { x: Math.round(videoWidth * 0.12), y },
+    { x: Math.round(videoWidth * 0.88), y },
+  ];
+  drawLineEditor();
+  syncControls();
+}
+
+function lineFromEditor() {
+  const editor = state.lineEditor;
+  if (!editor.ready) {
+    throw new Error('请先上传视频并设置穿线位置。');
+  }
+  return editor.points.map((point) => [
+    Math.round(clamp(point.x, 0, editor.videoWidth - 1)),
+    Math.round(clamp(point.y, 0, editor.videoHeight - 1)),
+  ]);
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function lineCanvasMetrics() {
+  const canvas = byId('lineOverlayCanvas');
+  const video = byId('linePreviewVideo');
+  const rect = canvas.getBoundingClientRect();
+  const videoWidth = state.lineEditor.videoWidth || video.videoWidth || 1;
+  const videoHeight = state.lineEditor.videoHeight || video.videoHeight || 1;
+  const scale = Math.min(rect.width / videoWidth, rect.height / videoHeight);
+  const drawWidth = videoWidth * scale;
+  const drawHeight = videoHeight * scale;
+  return {
+    canvas,
+    rect,
+    videoWidth,
+    videoHeight,
+    scale,
+    offsetX: (rect.width - drawWidth) / 2,
+    offsetY: (rect.height - drawHeight) / 2,
+  };
+}
+
+function videoPointToCanvas(point, metrics) {
+  return {
+    x: metrics.offsetX + point.x * metrics.scale,
+    y: metrics.offsetY + point.y * metrics.scale,
+  };
+}
+
+function canvasPointToVideo(clientX, clientY, metrics) {
+  return {
+    x: clamp((clientX - metrics.rect.left - metrics.offsetX) / metrics.scale, 0, metrics.videoWidth - 1),
+    y: clamp((clientY - metrics.rect.top - metrics.offsetY) / metrics.scale, 0, metrics.videoHeight - 1),
+  };
+}
+
+function resizeLineCanvas() {
+  const canvas = byId('lineOverlayCanvas');
+  const rect = canvas.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(rect.width * ratio));
+  const height = Math.max(1, Math.round(rect.height * ratio));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  drawLineEditor();
+}
+
+function drawLineEditor() {
+  const canvas = byId('lineOverlayCanvas');
+  if (!canvas || byId('lineSetupPanel').hidden || !state.lineEditor.ready) {
+    return;
+  }
+  const metrics = lineCanvasMetrics();
+  const ratio = window.devicePixelRatio || 1;
+  const context = canvas.getContext('2d');
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, metrics.rect.width, metrics.rect.height);
+
+  const [start, end] = state.lineEditor.points.map((point) => videoPointToCanvas(point, metrics));
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  context.strokeStyle = 'rgba(5, 7, 13, 0.86)';
+  context.lineWidth = 9;
+  context.beginPath();
+  context.moveTo(start.x, start.y);
+  context.lineTo(end.x, end.y);
+  context.stroke();
+  context.strokeStyle = '#ffb25d';
+  context.lineWidth = 4;
+  context.beginPath();
+  context.moveTo(start.x, start.y);
+  context.lineTo(end.x, end.y);
+  context.stroke();
+
+  [start, end].forEach((point) => {
+    context.beginPath();
+    context.arc(point.x, point.y, 10, 0, Math.PI * 2);
+    context.fillStyle = '#ffd39b';
+    context.fill();
+    context.lineWidth = 3;
+    context.strokeStyle = 'rgba(5, 7, 13, 0.9)';
+    context.stroke();
+  });
+
+  byId('lineCoordinateText').textContent = lineFromEditor()
+    .map((point) => point.join(','))
+    .join(' -> ');
+}
+
+function nearestLineTarget(clientX, clientY) {
+  const metrics = lineCanvasMetrics();
+  const pointer = { x: clientX - metrics.rect.left, y: clientY - metrics.rect.top };
+  const canvasPoints = state.lineEditor.points.map((point) => videoPointToCanvas(point, metrics));
+  const distances = canvasPoints.map((point) => Math.hypot(point.x - pointer.x, point.y - pointer.y));
+  if (distances[0] <= 24) return 'start';
+  if (distances[1] <= 24) return 'end';
+  return 'line';
+}
+
+function setLinePointFromPointer(target, clientX, clientY) {
+  const metrics = lineCanvasMetrics();
+  const point = canvasPointToVideo(clientX, clientY, metrics);
+  if (target === 'start') {
+    state.lineEditor.points[0] = point;
+  } else if (target === 'end') {
+    state.lineEditor.points[1] = point;
+  } else {
+    const midpoint = {
+      x: (state.lineEditor.points[0].x + state.lineEditor.points[1].x) / 2,
+      y: (state.lineEditor.points[0].y + state.lineEditor.points[1].y) / 2,
+    };
+    const dx = point.x - midpoint.x;
+    const dy = point.y - midpoint.y;
+    state.lineEditor.points = state.lineEditor.points.map((linePoint) => ({
+      x: clamp(linePoint.x + dx, 0, state.lineEditor.videoWidth - 1),
+      y: clamp(linePoint.y + dy, 0, state.lineEditor.videoHeight - 1),
+    }));
+  }
+  drawLineEditor();
+}
+
+function bindLineEditorEvents() {
+  const canvas = byId('lineOverlayCanvas');
+  canvas.addEventListener('pointerdown', (event) => {
+    if (!state.lineEditor.ready) return;
+    try {
+      canvas.setPointerCapture(event.pointerId);
+    } catch {
+      // Synthetic pointer events used by browser automation may not own a capture target.
+    }
+    state.lineEditor.dragging = nearestLineTarget(event.clientX, event.clientY);
+    setLinePointFromPointer(state.lineEditor.dragging, event.clientX, event.clientY);
+  });
+  canvas.addEventListener('pointermove', (event) => {
+    if (!state.lineEditor.dragging) return;
+    setLinePointFromPointer(state.lineEditor.dragging, event.clientX, event.clientY);
+  });
+  canvas.addEventListener('pointerup', () => {
+    state.lineEditor.dragging = null;
+  });
+  canvas.addEventListener('pointercancel', () => {
+    state.lineEditor.dragging = null;
+  });
+  window.addEventListener('resize', resizeLineCanvas);
 }
 
 function renderPipeline(steps) {
@@ -366,7 +589,11 @@ async function loadDashboard() {
   if (inference.status === 'running' || inference.status === 'stopping') {
     setMode('batch');
     renderStatus(inference);
-    showEmptyState('视频任务正在处理', '后端批处理任务仍在运行，完成后会自动切换为结果视频播放。');
+    if (inference.task_id) {
+      showInferenceStream(inference.task_id);
+    } else {
+      showEmptyState('视频任务正在处理', '后端批处理任务仍在运行，完成后会自动切换为结果视频播放。');
+    }
     startInferencePolling();
     return;
   }
@@ -400,6 +627,9 @@ function startInferencePolling() {
       if (snapshot.output_video) {
         state.lastOutputVideo = snapshot.output_video;
       }
+      if (snapshot.status === 'running' && snapshot.task_id && byId('realtimeStream').hidden) {
+        showInferenceStream(snapshot.task_id);
+      }
       if (snapshot.status === 'completed' || snapshot.status === 'stopped' || snapshot.status === 'failed') {
         stopInferencePolling();
         setMode('idle');
@@ -430,6 +660,7 @@ async function startUploadFlow() {
   nextViewToken();
   resetResultVideo();
   resetRealtimeStream();
+  resetLineSetup({ clearUpload: true });
   setBusy(true, 'upload');
   try {
     const formData = new FormData();
@@ -439,17 +670,69 @@ async function startUploadFlow() {
       body: formData,
     });
 
+    state.uploadedVideo = upload;
+    if (state.uploadedVideoUrl) {
+      URL.revokeObjectURL(state.uploadedVideoUrl);
+    }
+    state.uploadedVideoUrl = URL.createObjectURL(file);
+    showLineSetup(file.name);
+  } catch (error) {
+    setMode('idle');
+    setError(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function showLineSetup(fileName) {
+  nextViewToken();
+  resetResultVideo();
+  resetRealtimeStream();
+  byId('emptyState').hidden = true;
+  const panel = byId('lineSetupPanel');
+  const preview = byId('linePreviewVideo');
+  panel.hidden = false;
+  preview.src = state.uploadedVideoUrl;
+  preview.currentTime = 0;
+  preview.addEventListener(
+    'loadedmetadata',
+    () => {
+      initializeLineEditor(preview.videoWidth || 1920, preview.videoHeight || 1080);
+      resizeLineCanvas();
+      setError('');
+    },
+    { once: true },
+  );
+  preview.load();
+  updateEmptyState('设置穿线位置', fileName || '拖动主屏线段两端后开始分析。');
+}
+
+async function startAnalysisFlow() {
+  setError('');
+  if (!state.uploadedVideo?.path) {
+    setError('请先上传视频并设置穿线位置。');
+    return;
+  }
+
+  nextViewToken();
+  setBusy(true, 'analysis');
+  try {
     const started = await requestJson('/api/inference/start', {
       method: 'POST',
       json: {
         source_type: 'video',
-        source: upload.path,
+        source: state.uploadedVideo.path,
+        line: lineFromEditor(),
       },
     });
 
     setMode('batch');
     renderStatus(started);
-    showEmptyState('视频任务已启动', '后端正在处理上传视频，完成后会自动切换为结果视频播放。');
+    if (started.task_id) {
+      showInferenceStream(started.task_id);
+    } else {
+      showEmptyState('视频任务已启动', '后端正在处理上传视频，完成后会自动切换为结果视频播放。');
+    }
     startInferencePolling();
   } catch (error) {
     setMode('idle');
@@ -792,6 +1075,9 @@ function bindEvents() {
   byId('uploadVideoButton').addEventListener('click', () => {
     startUploadFlow().catch((error) => setError(error.message));
   });
+  byId('analysisStartButton').addEventListener('click', () => {
+    startAnalysisFlow().catch((error) => setError(error.message));
+  });
   byId('cameraButton').addEventListener('click', () => {
     startCameraFlow().catch((error) => setError(error.message));
   });
@@ -801,6 +1087,8 @@ function bindEvents() {
   byId('videoFileInput').addEventListener('change', () => {
     if (byId('videoFileInput').files?.[0]) {
       setError('');
+      resetLineSetup({ clearUpload: true });
+      showEmptyState('视频已选择', '点击上传视频并预览，然后拖动主屏穿线位置。');
     }
   });
   byId('cameraDeviceSelect').addEventListener('change', () => {
@@ -906,6 +1194,7 @@ function initParticles() {
 async function boot() {
   initParticles();
   bindEvents();
+  bindLineEditorEvents();
   syncControls();
   await loadDashboard();
 }

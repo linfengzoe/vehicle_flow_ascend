@@ -48,6 +48,14 @@
 
           <img id="realtimeStream" alt="实时推理标注画面" hidden />
           <video id="resultVideo" controls playsinline preload="metadata" hidden></video>
+          <div class="line-setup" id="lineSetupPanel" hidden>
+            <video id="linePreviewVideo" muted playsinline preload="metadata"></video>
+            <canvas id="lineOverlayCanvas" aria-label="穿线位置编辑画布"></canvas>
+            <div class="line-setup__hud">
+              <span>穿线编辑</span>
+              <small id="lineCoordinateText">0,0 -> 0,0</small>
+            </div>
+          </div>
 
           <div class="preview-dock" id="cameraPreviewDock" hidden>
             <div class="preview-dock__head">
@@ -81,7 +89,8 @@
         </label>
 
         <div class="action-stack">
-          <button class="primary-button" id="uploadVideoButton" type="button">上传视频并分析</button>
+          <button class="secondary-button" id="uploadVideoButton" type="button">上传视频并预览</button>
+          <button class="primary-button" id="analysisStartButton" type="button">开始分析</button>
           <button class="secondary-button" id="cameraButton" type="button">开启摄像头</button>
         </div>
       </aside>

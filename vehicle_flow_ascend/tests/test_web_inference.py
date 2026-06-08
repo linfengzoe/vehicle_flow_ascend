@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import time
 
+import numpy as np
+
 from vehicle_flow_ascend.config import VehicleFlowConfig
 from vehicle_flow_ascend.types import Detection
 from vehicle_flow_ascend.web import inference
@@ -66,6 +68,54 @@ def test_inference_manager_runs_task_and_reports_counts(monkeypatch, tmp_path) -
     assert done["fps"] == 18.5
     assert done["counts"] == {"total": 2, "car": 2}
     assert done["output_video"] is not None
+
+
+def test_inference_manager_applies_line_override_and_publishes_latest_frame(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    manager = InferenceTaskManager(VehicleFlowConfig(), project_root=tmp_path)
+
+    def fake_create_detector(config):
+        assert config.line.start == (12, 34)
+        assert config.line.end == (320, 210)
+        return FakeDetector()
+
+    def fake_run_app(config, detector, *, show_window, stop_requested, progress_callback):
+        assert show_window is False
+        annotated = np.zeros((16, 20, 3), dtype=np.uint8)
+        annotated[:, :] = (0, 120, 255)
+        progress_callback(
+            {
+                "frames": 1,
+                "fps": 9.5,
+                "counts": {"total": 1, "car": 1},
+                "annotated_frame": annotated,
+            }
+        )
+        Path(config.output_video).parent.mkdir(parents=True, exist_ok=True)
+        Path(config.output_video).write_bytes(b"demo")
+        return {"total": 1, "car": 1}
+
+    monkeypatch.setattr(inference, "create_detector", fake_create_detector)
+    monkeypatch.setattr(inference, "run_app", fake_run_app)
+
+    started = manager.start(
+        {
+            "source_type": "video",
+            "source": "data/demo.mp4",
+            "line": [[12, 34], [320, 210]],
+        }
+    )
+    frame = manager.wait_for_frame(started["task_id"], last_version=0, timeout=1.0)
+    done = wait_until_done(manager)
+
+    assert done["status"] == "completed"
+    assert done["frame_version"] == 1
+    assert frame is not None
+    version, jpeg = frame
+    assert version == 1
+    assert jpeg.startswith(b"\xff\xd8")
 
 
 def test_inference_manager_surfaces_worker_errors(monkeypatch, tmp_path) -> None:

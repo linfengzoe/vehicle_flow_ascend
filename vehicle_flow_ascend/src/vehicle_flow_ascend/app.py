@@ -128,6 +128,7 @@ def run_app(
                         "frames": processed.frames,
                         "fps": processed.fps,
                         "counts": processed.counts,
+                        "annotated_frame": processed.annotated_frame,
                     }
                 )
 

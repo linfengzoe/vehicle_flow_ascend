@@ -27,6 +27,14 @@ class _FakeStatusManager:
         return dict(self._status)
 
 
+class _FakeInferenceStreamManager(_FakeStatusManager):
+    def wait_for_frame(self, task_id: str, last_version: int, timeout: float = 1.0):
+        assert task_id == "task-1"
+        assert last_version == 0
+        assert timeout > 0
+        return 1, b"\xff\xd8demo-jpeg\xff\xd9"
+
+
 def test_dashboard_payload_exposes_presentation_not_parameter_panel() -> None:
     config = load_config(PROJECT_ROOT / "configs" / "pc_demo.yaml")
     inference_status = {
@@ -82,6 +90,10 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "cameraDeviceSelect" in index_html
     assert "realtimeStream" in index_html
     assert "cameraPreview" in index_html
+    assert "lineSetupPanel" in index_html
+    assert "linePreviewVideo" in index_html
+    assert "lineOverlayCanvas" in index_html
+    assert "analysisStartButton" in index_html
     assert "captureCanvas" in index_html
     assert "videoPathInput" not in index_html
     assert "cameraInput" not in index_html
@@ -100,6 +112,11 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "MAX_REALTIME_FRAME_FAILURES" in app_js
     assert "realtimeFrameFailures" in app_js
     assert "scaleCaptureDimensions" in app_js
+    assert "initializeLineEditor" in app_js
+    assert "lineFromEditor" in app_js
+    assert "showInferenceStream" in app_js
+    assert "/api/inference/stream" in app_js
+    assert "line: lineFromEditor()" in app_js
     assert "getUserMedia" in app_js
     assert "initParticles" in app_js
     assert "#particleCanvas" in styles_css
@@ -145,6 +162,7 @@ def test_sanitize_start_payload_removes_client_output_video() -> None:
         "source": "data/web_uploads/demo.mp4",
         "output_video": "D:/not-allowed/output.mp4",
         "max_frames": 12,
+        "line": [[12, 34], [320, 210]],
     }
 
     sanitized = _sanitize_start_payload(payload, PROJECT_ROOT)
@@ -153,6 +171,7 @@ def test_sanitize_start_payload_removes_client_output_video() -> None:
         "source_type": "video",
         "source": str(PROJECT_ROOT / "data" / "web_uploads" / "demo.mp4"),
         "max_frames": 12,
+        "line": [[12, 34], [320, 210]],
     }
     assert payload["output_video"] == "D:/not-allowed/output.mp4"
 
@@ -290,3 +309,33 @@ def test_output_media_endpoint_serves_byte_ranges(tmp_path) -> None:
     assert headers["Content-Range"] == "bytes 2-5/10"
     assert headers["Content-Length"] == "4"
     assert body == b"cdef"
+
+
+def test_inference_stream_endpoint_serves_latest_annotated_frame(tmp_path) -> None:
+    config = VehicleFlowConfig()
+    handler = _make_handler(
+        config,
+        tmp_path,
+        _FakeInferenceStreamManager({"status": "running", "task_id": "task-1"}),
+        _FakeStatusManager(),
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/api/inference/stream?task_id=task-1"
+
+        with urlopen(url, timeout=3) as response:
+            body = response.read(256)
+            status = response.status
+            headers = response.headers
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("multipart/x-mixed-replace")
+    assert b"--frame" in body
+    assert b"Content-Type: image/jpeg" in body
+    assert b"\xff\xd8demo-jpeg\xff\xd9" in body

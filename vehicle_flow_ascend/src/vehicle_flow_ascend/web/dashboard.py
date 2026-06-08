@@ -21,7 +21,7 @@ _MAX_JSON_BYTES = 64 * 1024
 _MAX_REALTIME_FRAME_BYTES = 4 * 1024 * 1024
 _MAX_UPLOAD_BYTES = 512 * 1024 * 1024
 _MEDIA_CHUNK_BYTES = 1024 * 1024
-_REALTIME_STREAM_IDLE_TIMEOUTS = 30
+_STREAM_IDLE_TIMEOUTS = 30
 
 
 @dataclass(frozen=True)
@@ -82,6 +82,9 @@ def _make_handler(
                 return
             if parsed.path == "/api/realtime/stream":
                 self._handle_realtime_stream(parsed.query)
+                return
+            if parsed.path == "/api/inference/stream":
+                self._handle_inference_stream(parsed.query)
                 return
             if parsed.path == "/media/output-video":
                 self._send_media(
@@ -194,6 +197,46 @@ def _make_handler(
                 self._send_json({"error": "invalid realtime session"}, status=400)
                 return
 
+            self._send_mjpeg_stream(
+                wait_for_frame=lambda last_version: realtime_manager.wait_for_frame(
+                    session_id,
+                    last_version,
+                    timeout=1.0,
+                ),
+                should_continue=lambda: (
+                    (status := realtime_manager.status()).get("status") == "running"
+                    and status.get("session_id") == session_id
+                ),
+            )
+
+        def _handle_inference_stream(self, query: str) -> None:
+            try:
+                task_id = _required_query_param(query, "task_id")
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=400)
+                return
+
+            status = task_manager.status()
+            if status.get("status") not in {"running", "stopping"}:
+                self._send_json({"error": "inference task is not running"}, status=409)
+                return
+            if status.get("task_id") != task_id:
+                self._send_json({"error": "invalid inference task"}, status=400)
+                return
+
+            self._send_mjpeg_stream(
+                wait_for_frame=lambda last_version: task_manager.wait_for_frame(
+                    task_id,
+                    last_version,
+                    timeout=1.0,
+                ),
+                should_continue=lambda: (
+                    (status := task_manager.status()).get("status") in {"running", "stopping"}
+                    and status.get("task_id") == task_id
+                ),
+            )
+
+        def _send_mjpeg_stream(self, wait_for_frame, should_continue) -> None:
             self.send_response(200)
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
             self.send_header("Cache-Control", "no-store")
@@ -204,16 +247,12 @@ def _make_handler(
             idle_timeouts = 0
             while True:
                 try:
-                    frame = realtime_manager.wait_for_frame(session_id, last_version, timeout=1.0)
+                    frame = wait_for_frame(last_version)
                     if frame is None:
-                        status = realtime_manager.status()
-                        if (
-                            status.get("status") != "running"
-                            or status.get("session_id") != session_id
-                        ):
+                        if not should_continue():
                             break
                         idle_timeouts += 1
-                        if idle_timeouts >= _REALTIME_STREAM_IDLE_TIMEOUTS:
+                        if idle_timeouts >= _STREAM_IDLE_TIMEOUTS:
                             break
                         continue
                     idle_timeouts = 0
