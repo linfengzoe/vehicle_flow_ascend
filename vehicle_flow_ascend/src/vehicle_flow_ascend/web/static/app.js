@@ -32,7 +32,8 @@ const state = {
 const byId = (id) => document.getElementById(id);
 const MAX_REALTIME_FRAME_FAILURES = 5;
 const REALTIME_RETRY_MESSAGE = '实时帧传输不稳定，正在重试。';
-const MAX_CAPTURE_WIDTH = 960;
+const MAX_CAPTURE_WIDTH = 480;
+const REALTIME_CAPTURE_DELAY_MS = 0;
 
 const FALLBACK_CLASSES = [
   { key: 'car', label: '小型车', accent: '#ffb25d' },
@@ -337,6 +338,18 @@ function lineFromEditor() {
   return editor.points.map((point) => [
     Math.round(clamp(point.x, 0, editor.videoWidth - 1)),
     Math.round(clamp(point.y, 0, editor.videoHeight - 1)),
+  ]);
+}
+
+function lineForRealtimeCapture() {
+  const editor = state.lineEditor;
+  const line = lineFromEditor();
+  const captureSize = scaleCaptureDimensions(editor.videoWidth, editor.videoHeight);
+  const scaleX = captureSize.width / editor.videoWidth;
+  const scaleY = captureSize.height / editor.videoHeight;
+  return line.map(([x, y]) => [
+    Math.round(x * scaleX),
+    Math.round(y * scaleY),
   ]);
 }
 
@@ -799,7 +812,7 @@ function cleanupLocalRealtimeSession() {
 
 function stopCaptureLoop(abortCurrent = false) {
   if (state.captureTimer) {
-    clearInterval(state.captureTimer);
+    clearTimeout(state.captureTimer);
     state.captureTimer = null;
   }
   if (abortCurrent && state.frameAbortController) {
@@ -951,9 +964,21 @@ async function captureAndSendFrame() {
 
 function startCaptureLoop() {
   stopCaptureLoop(true);
-  state.captureTimer = setInterval(() => {
-    captureAndSendFrame().catch((error) => setError(error.message));
-  }, 100);
+  const tick = async () => {
+    if (!state.realtimeSessionId) {
+      state.captureTimer = null;
+      return;
+    }
+    try {
+      await captureAndSendFrame();
+    } catch (error) {
+      setError(error.message);
+    }
+    if (state.realtimeSessionId) {
+      state.captureTimer = setTimeout(tick, REALTIME_CAPTURE_DELAY_MS);
+    }
+  };
+  state.captureTimer = setTimeout(tick, 0);
 }
 
 function startRealtimePolling() {
@@ -1053,7 +1078,7 @@ async function startCameraAnalysisFlow() {
     const started = await requestJson('/api/realtime/start', {
       method: 'POST',
       json: {
-        line: lineFromEditor(),
+        line: lineForRealtimeCapture(),
       },
     });
     state.realtimeSessionId = started.session_id;

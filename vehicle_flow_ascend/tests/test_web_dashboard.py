@@ -111,20 +111,26 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "deviceId: { exact: selectedDeviceId }" in app_js
     assert "MAX_REALTIME_FRAME_FAILURES" in app_js
     assert "realtimeFrameFailures" in app_js
+    assert "const MAX_CAPTURE_WIDTH = 480;" in app_js
+    assert "const REALTIME_CAPTURE_DELAY_MS = 0;" in app_js
     assert "scaleCaptureDimensions" in app_js
     assert "initializeLineEditor" in app_js
     assert "lineFromEditor" in app_js
+    assert "lineForRealtimeCapture" in app_js
     assert "showInferenceStream" in app_js
     assert "startCameraPreviewFlow" in app_js
     assert "startCameraAnalysisFlow" in app_js
     assert "camera-preview" in app_js
     assert "/api/inference/stream" in app_js
     assert "line: lineFromEditor()" in app_js
+    assert "line: lineForRealtimeCapture()" in app_js
     assert "getUserMedia" in app_js
     assert "initParticles" in app_js
     assert "#particleCanvas" in styles_css
     assert "prefers-reduced-motion" in styles_css
     assert "city-night" in styles_css
+    result_media_block = styles_css.split("#realtimeStream,", 1)[1].split(".empty-state", 1)[0]
+    assert "object-fit: contain;" in result_media_block
 
 
 def test_media_status_payload_reports_missing_and_existing_file(tmp_path) -> None:

@@ -17,6 +17,7 @@ from vehicle_flow_ascend.detectors.base import Detector, create_detector
 DEFAULT_IDLE_TIMEOUT_SECONDS = 10.0
 _IDLE_EXPIRED_ERROR = "realtime session expired after idle timeout"
 _REAPER_MAX_SLEEP_SECONDS = 0.25
+_REALTIME_IMAGE_SIZE = 320
 
 
 @dataclass
@@ -79,6 +80,7 @@ class RealtimeInferenceManager:
             session_config = replace(
                 self._base_config,
                 line=_line_from_payload(payload or {}, self._base_config.line),
+                image_size=min(self._base_config.image_size, _REALTIME_IMAGE_SIZE),
             )
             detector = create_detector(session_config)
             self._detector = detector

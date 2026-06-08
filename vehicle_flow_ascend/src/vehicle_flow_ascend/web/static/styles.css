@@ -281,7 +281,7 @@ h3 {
   z-index: 1;
   width: 100%;
   height: 600px;
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 22px;
   background: #05070d;
 }

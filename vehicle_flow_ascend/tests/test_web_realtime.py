@@ -86,6 +86,22 @@ def test_realtime_manager_applies_line_override_on_start(monkeypatch) -> None:
     assert captured_lines == [[[5, 6], [28, 18]]]
 
 
+def test_realtime_manager_uses_optimized_image_size_for_live_fps(monkeypatch) -> None:
+    captured_image_sizes = []
+
+    def fake_create_detector(config):
+        captured_image_sizes.append(config.image_size)
+        return FakeDetector()
+
+    monkeypatch.setattr(realtime, "create_detector", fake_create_detector)
+    manager = RealtimeInferenceManager(VehicleFlowConfig(image_size=640))
+
+    started = manager.start()
+
+    assert started["status"] == "running"
+    assert captured_image_sizes == [320]
+
+
 def test_realtime_manager_rejects_duplicate_session(monkeypatch) -> None:
     monkeypatch.setattr(realtime, "create_detector", lambda config: FakeDetector())
     manager = RealtimeInferenceManager(VehicleFlowConfig())
