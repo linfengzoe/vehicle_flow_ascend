@@ -129,8 +129,11 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "MAX_REALTIME_FRAME_FAILURES" in app_js
     assert "realtimeFrameFailures" in app_js
     assert "const MAX_CAPTURE_WIDTH = 480;" in app_js
-    assert "const REALTIME_CAPTURE_DELAY_MS = 0;" in app_js
+    assert "const REALTIME_CAPTURE_DELAY_MS = 80;" in app_js
     assert "scaleCaptureDimensions" in app_js
+    assert "scheduleCaptureTick" in app_js
+    assert "requestVideoFrameCallback" in app_js
+    assert "window.requestAnimationFrame" in app_js
     assert "initializeLineEditor" in app_js
     assert "lineFromEditor" in app_js
     assert "lineForRealtimeCapture" in app_js
@@ -144,11 +147,16 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "getUserMedia" in app_js
     assert "updateAsciiTelemetry" in app_js
     assert "initParticleVehicleField" in app_js
+    assert "pauseParticleVehicleField" in app_js
+    assert "hideEmptyState" in app_js
     assert "noise2D" in app_js
     assert "sdCar" in app_js
     assert "vehicleParticleState" in app_js
     assert "dragging" in app_js
     assert "pointermove" in app_js
+    assert "cancelAnimationFrame(particleState.animationFrame)" in app_js
+    assert "canvas.width = 1" in app_js
+    assert "hideEmptyState()" in app_js
     assert "STATUS_TAGS" in app_js
     assert "待命" in app_js
     assert "预览" in app_js

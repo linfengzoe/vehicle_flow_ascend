@@ -5,6 +5,7 @@ const state = {
   inferencePollTimer: null,
   realtimePollTimer: null,
   captureTimer: null,
+  captureFrameCallback: 0,
   frameUploadInFlight: false,
   frameAbortController: null,
   realtimeFrameFailures: 0,
@@ -33,7 +34,7 @@ const byId = (id) => document.getElementById(id);
 const MAX_REALTIME_FRAME_FAILURES = 5;
 const REALTIME_RETRY_MESSAGE = '实时帧传输不稳定，正在重试。';
 const MAX_CAPTURE_WIDTH = 480;
-const REALTIME_CAPTURE_DELAY_MS = 0;
+const REALTIME_CAPTURE_DELAY_MS = 80;
 
 const FALLBACK_CLASSES = [
   { key: 'car', label: '小型车', accent: '#ffb25d' },
@@ -367,6 +368,11 @@ function resetLineSetup({ clearUpload = false } = {}) {
   syncControls();
 }
 
+function hideEmptyState() {
+  byId('emptyState').hidden = true;
+  pauseParticleVehicleField();
+}
+
 function showEmptyState(title, description) {
   nextViewToken();
   resetResultVideo();
@@ -385,7 +391,7 @@ function showRealtimeStream(sessionId) {
   resetResultVideo();
   resetLineSetup();
   const realtimeStream = byId('realtimeStream');
-  byId('emptyState').hidden = true;
+  hideEmptyState();
   realtimeStream.hidden = false;
   realtimeStream.src = `/api/realtime/stream?session_id=${encodeURIComponent(sessionId)}&t=${Date.now()}`;
 }
@@ -395,7 +401,7 @@ function showInferenceStream(taskId) {
   resetResultVideo();
   resetLineSetup();
   const realtimeStream = byId('realtimeStream');
-  byId('emptyState').hidden = true;
+  hideEmptyState();
   realtimeStream.hidden = false;
   realtimeStream.src = `/api/inference/stream?task_id=${encodeURIComponent(taskId)}&t=${Date.now()}`;
 }
@@ -419,7 +425,7 @@ async function showResultVideo(outputPath, token = nextViewToken()) {
   resetResultVideo();
   resetRealtimeStream();
   resetLineSetup();
-  byId('emptyState').hidden = true;
+  hideEmptyState();
   resultVideo.hidden = false;
   resultVideo.src = `/media/output-video?path=${encodeURIComponent(outputPath)}&t=${Date.now()}`;
   resultVideo.load();
@@ -728,6 +734,10 @@ function resizeParticleVehicle() {
 function drawParticleVehicleField(_timestamp = 0, scheduleNext = true) {
   const particleState = vehicleParticleState;
   const { context, width, height, cols, rows } = particleState;
+  if (byId('emptyState')?.hidden) {
+    particleState.animationFrame = 0;
+    return;
+  }
   if (!context || width <= 1 || height <= 1 || cols <= 0 || rows <= 0) {
     return;
   }
@@ -869,9 +879,29 @@ function drawParticleVehicleField(_timestamp = 0, scheduleNext = true) {
   }
 }
 
+function pauseParticleVehicleField() {
+  const particleState = vehicleParticleState;
+  window.cancelAnimationFrame(particleState.animationFrame);
+  particleState.animationFrame = 0;
+  particleState.width = 1;
+  particleState.height = 1;
+  particleState.cols = 0;
+  particleState.rows = 0;
+  const { canvas, context } = particleState;
+  if (canvas && context) {
+    canvas.width = 1;
+    canvas.height = 1;
+    context.clearRect(0, 0, 1, 1);
+  }
+}
+
 function restartParticleVehicleField() {
   const particleState = vehicleParticleState;
   window.cancelAnimationFrame(particleState.animationFrame);
+  particleState.animationFrame = 0;
+  if (byId('emptyState')?.hidden) {
+    return;
+  }
   drawParticleVehicleField();
 }
 
@@ -1099,7 +1129,7 @@ function showLineSetup(fileName) {
   nextViewToken();
   resetResultVideo();
   resetRealtimeStream();
-  byId('emptyState').hidden = true;
+  hideEmptyState();
   const panel = byId('lineSetupPanel');
   const preview = byId('linePreviewVideo');
   panel.hidden = false;
@@ -1115,7 +1145,7 @@ function showCameraLineSetup(stream) {
   nextViewToken();
   resetResultVideo();
   resetRealtimeStream();
-  byId('emptyState').hidden = true;
+  hideEmptyState();
   const panel = byId('lineSetupPanel');
   const preview = byId('linePreviewVideo');
   panel.hidden = false;
@@ -1202,6 +1232,11 @@ function stopCaptureLoop(abortCurrent = false) {
     clearTimeout(state.captureTimer);
     state.captureTimer = null;
   }
+  const preview = byId('cameraPreview');
+  if (state.captureFrameCallback && preview.cancelVideoFrameCallback) {
+    preview.cancelVideoFrameCallback(state.captureFrameCallback);
+  }
+  state.captureFrameCallback = 0;
   if (abortCurrent && state.frameAbortController) {
     state.frameAbortController.abort();
     state.frameAbortController = null;
@@ -1349,6 +1384,26 @@ async function captureAndSendFrame() {
   }
 }
 
+function scheduleCaptureTick(tick) {
+  if (!state.realtimeSessionId) {
+    return;
+  }
+
+  const preview = byId('cameraPreview');
+  if (preview.requestVideoFrameCallback) {
+    state.captureFrameCallback = preview.requestVideoFrameCallback(() => {
+      state.captureFrameCallback = 0;
+      tick();
+    });
+    return;
+  }
+
+  state.captureTimer = window.setTimeout(() => {
+    state.captureTimer = 0;
+    window.requestAnimationFrame(tick);
+  }, REALTIME_CAPTURE_DELAY_MS);
+}
+
 function startCaptureLoop() {
   stopCaptureLoop(true);
   const tick = async () => {
@@ -1362,10 +1417,10 @@ function startCaptureLoop() {
       setError(error.message);
     }
     if (state.realtimeSessionId) {
-      state.captureTimer = setTimeout(tick, REALTIME_CAPTURE_DELAY_MS);
+      scheduleCaptureTick(tick);
     }
   };
-  state.captureTimer = setTimeout(tick, 0);
+  scheduleCaptureTick(tick);
 }
 
 function startRealtimePolling() {
