@@ -7,6 +7,7 @@ from urllib.request import Request, urlopen
 
 from vehicle_flow_ascend.config import VehicleFlowConfig, load_config
 from vehicle_flow_ascend.web.dashboard import (
+    DashboardServerConfig,
     _dashboard_payload,
     _make_handler,
     _media_status_payload,
@@ -73,6 +74,18 @@ def test_dashboard_payload_exposes_presentation_not_parameter_panel() -> None:
     ]
 
 
+def test_dashboard_server_config_uses_https_url_when_tls_enabled() -> None:
+    config = DashboardServerConfig(
+        host="0.0.0.0",
+        port=8766,
+        certfile="certs/web.crt",
+        keyfile="certs/web.key",
+    )
+
+    assert config.use_tls is True
+    assert config.url == "https://0.0.0.0:8766"
+
+
 def test_dashboard_static_assets_match_realtime_frontend() -> None:
     static_dir = PROJECT_ROOT / "src" / "vehicle_flow_ascend" / "web" / "static"
 
@@ -110,6 +123,8 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "AbortController" in app_js
     assert "signal: abortController.signal" in app_js
     assert "refreshCameraDevices" in app_js
+    assert "window.isSecureContext" in app_js
+    assert "HTTPS" in app_js
     assert "deviceId: { exact: selectedDeviceId }" in app_js
     assert "MAX_REALTIME_FRAME_FAILURES" in app_js
     assert "realtimeFrameFailures" in app_js

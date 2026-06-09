@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 from dataclasses import dataclass
 from email.message import Message
 from email.parser import BytesParser
@@ -28,6 +29,17 @@ _STREAM_IDLE_TIMEOUTS = 30
 class DashboardServerConfig:
     host: str = "127.0.0.1"
     port: int = 8765
+    certfile: str | None = None
+    keyfile: str | None = None
+
+    @property
+    def use_tls(self) -> bool:
+        return bool(self.certfile or self.keyfile)
+
+    @property
+    def url(self) -> str:
+        scheme = "https" if self.use_tls else "http"
+        return f"{scheme}://{self.host}:{self.port}"
 
 
 def run_dashboard(config: VehicleFlowConfig, server_config: DashboardServerConfig) -> None:
@@ -36,8 +48,9 @@ def run_dashboard(config: VehicleFlowConfig, server_config: DashboardServerConfi
     realtime_manager = RealtimeInferenceManager(config)
     handler = _make_handler(config, static_dir, task_manager, realtime_manager)
     server = ThreadingHTTPServer((server_config.host, server_config.port), handler)
-    url = f"http://{server_config.host}:{server_config.port}"
-    print(f"Vehicle Flow Dashboard running at {url}")
+    if server_config.use_tls:
+        _wrap_server_socket_for_tls(server, server_config)
+    print(f"Vehicle Flow Dashboard running at {server_config.url}")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
@@ -45,6 +58,17 @@ def run_dashboard(config: VehicleFlowConfig, server_config: DashboardServerConfi
         print("\nDashboard stopped.")
     finally:
         server.server_close()
+
+
+def _wrap_server_socket_for_tls(
+    server: ThreadingHTTPServer,
+    server_config: DashboardServerConfig,
+) -> None:
+    if not server_config.certfile or not server_config.keyfile:
+        raise ValueError("--web-certfile and --web-keyfile must be provided together")
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(server_config.certfile, server_config.keyfile)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
 
 
 def _make_handler(

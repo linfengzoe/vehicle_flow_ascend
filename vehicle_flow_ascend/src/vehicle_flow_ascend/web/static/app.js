@@ -241,13 +241,32 @@ function classesConfig() {
   return state.dashboard?.classes?.length ? state.dashboard.classes : FALLBACK_CLASSES;
 }
 
+function isLocalBrowserOrigin() {
+  return ['localhost', '127.0.0.1', '[::1]', '::1'].includes(window.location.hostname);
+}
+
+function cameraUnavailableCopy() {
+  if (window.isSecureContext === false && !isLocalBrowserOrigin()) {
+    const httpsUrl = `https://${window.location.hostname}:8766${window.location.pathname}`;
+    return {
+      option: '需要 HTTPS 才能开启摄像头',
+      error: `浏览器摄像头只允许在安全页面使用。请改用 ${httpsUrl} 访问开发板前端，并在证书提示页选择继续访问。`,
+    };
+  }
+  return {
+    option: '当前浏览器不支持摄像头',
+    error: '当前浏览器不支持摄像头访问，请使用新版 Edge、Chrome，或通过 HTTPS/localhost 访问。',
+  };
+}
+
 async function refreshCameraDevices({ silent = true } = {}) {
   const select = byId('cameraDeviceSelect');
   if (!navigator.mediaDevices?.enumerateDevices || !navigator.mediaDevices?.getUserMedia) {
-    select.innerHTML = '<option value="">当前浏览器不支持摄像头</option>';
+    const copy = cameraUnavailableCopy();
+    select.innerHTML = `<option value="">${escapeHtml(copy.option)}</option>`;
     select.disabled = true;
     if (!silent) {
-      setError('当前浏览器不支持摄像头访问，请使用新版 Edge、Chrome 或 HTTPS/localhost 访问。');
+      setError(copy.error);
     }
     return [];
   }

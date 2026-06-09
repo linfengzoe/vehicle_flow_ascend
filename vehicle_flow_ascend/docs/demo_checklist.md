@@ -25,6 +25,7 @@ python -m vehicle_flow_ascend --config configs/pc_demo.yaml --dry-run
 
 - [ ] 如果演示昇腾端，开发板型号为 Atlas 200I DK A2，且 `configs/ascend_om.yaml` 中的 `soc_version` 为 `Ascend310B4` 或已按实际 CANN/ATC 支持值调整。
 - [ ] 如果演示昇腾端，PC 能通过网线直连访问 `192.168.137.100`。
+- [ ] 如果要从 PC 浏览器使用摄像头访问开发板前端，已准备 HTTPS 地址；普通 `http://192.168.137.100` 只能稳定演示视频上传，不能保证浏览器摄像头权限。
 
 ## 2. PC 端模型和视频
 
@@ -82,11 +83,26 @@ source /usr/local/Ascend/ascend-toolkit/set_env.sh
 - [ ] 已转换 OM：`models/yolov5n.om`。
 - [ ] 已复制 `data/demo.mp4` 到开发板。
 - [ ] 已确认 `configs/ascend_om.yaml` 的 `model_path`、`source`、`soc_version` 正确，其中 Atlas 200I DK A2 默认使用 `Ascend310B4`。
+- [ ] 已安装板端依赖：`python3-numpy`、`python3-opencv`，以及 ATC 可能需要的 `python3-decorator`、`python3-sympy`、`python3-scipy`、`python3-attr`、`python3-psutil`。
 - [ ] 可运行：
 
 ```bash
 python -m vehicle_flow_ascend --config configs/ascend_om.yaml
 ```
+
+- [ ] 如果展示 Web 前端，HTTP 视频上传地址可用：
+
+```text
+http://192.168.137.100:8765/
+```
+
+- [ ] 如果展示浏览器摄像头，HTTPS 地址可用：
+
+```text
+https://192.168.137.100:8766/
+```
+
+- [ ] 首次打开 HTTPS 地址时，已在浏览器自签名证书提示页选择继续访问，并允许摄像头权限。
 
 如果要展示板端 USB 摄像头，而不是 PC 浏览器摄像头：
 

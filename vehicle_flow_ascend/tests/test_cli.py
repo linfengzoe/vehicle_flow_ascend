@@ -134,6 +134,42 @@ def test_web_run_starts_dashboard(monkeypatch) -> None:
     assert calls == {"backend": "torch_yolov5", "host": "0.0.0.0", "port": 8899}
 
 
+def test_web_run_passes_tls_certificate_paths(monkeypatch) -> None:
+    from vehicle_flow_ascend.web import dashboard
+
+    calls = {}
+
+    def fake_run_dashboard(config, server_config):
+        calls["backend"] = config.backend
+        calls["certfile"] = server_config.certfile
+        calls["keyfile"] = server_config.keyfile
+        calls["url"] = server_config.url
+
+    monkeypatch.setattr(dashboard, "run_dashboard", fake_run_dashboard)
+
+    exit_code = main([
+        "--config",
+        str(PROJECT_ROOT / "configs" / "pc_demo.yaml"),
+        "--web",
+        "--web-host",
+        "0.0.0.0",
+        "--web-port",
+        "8766",
+        "--web-certfile",
+        "certs/web.crt",
+        "--web-keyfile",
+        "certs/web.key",
+    ])
+
+    assert exit_code == 0
+    assert calls == {
+        "backend": "torch_yolov5",
+        "certfile": "certs/web.crt",
+        "keyfile": "certs/web.key",
+        "url": "https://0.0.0.0:8766",
+    }
+
+
 def test_normal_run_creates_detector_and_runs_app(monkeypatch, capsys) -> None:
     from vehicle_flow_ascend import app
     from vehicle_flow_ascend.detectors import base

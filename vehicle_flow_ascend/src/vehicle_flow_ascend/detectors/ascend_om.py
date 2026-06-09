@@ -132,18 +132,19 @@ class AscendOmDetector(Detector):
         if self._input_buffer is None or self._model_id is None:
             raise RuntimeError("Ascend model is not initialized")
         acl = self._acl
-        input_bytes = np.ascontiguousarray(model_input.astype(np.float32)).tobytes()
-        if len(input_bytes) > self._input_buffer.size:
+        input_array = np.ascontiguousarray(model_input.astype(np.float32))
+        input_bytes = input_array.nbytes
+        if input_bytes > self._input_buffer.size:
             raise RuntimeError(
-                f"model input bytes ({len(input_bytes)}) exceed allocated input buffer ({self._input_buffer.size})"
+                f"model input bytes ({input_bytes}) exceed allocated input buffer ({self._input_buffer.size})"
             )
 
         _check_acl(
             acl.rt.memcpy(
                 self._input_buffer.ptr,
                 self._input_buffer.size,
+                input_array.ctypes.data,
                 input_bytes,
-                len(input_bytes),
                 getattr(acl.rt, "ACL_MEMCPY_HOST_TO_DEVICE", 1),
             ),
             "acl.rt.memcpy host->device",
@@ -202,14 +203,21 @@ def _import_acl() -> Any:
 
 
 def _check_acl(ret: Any, operation: str) -> None:
-    if ret != 0:
-        raise RuntimeError(f"{operation} failed with ACL error code {ret}")
+    status = _acl_status(ret)
+    if status != 0:
+        raise RuntimeError(f"{operation} failed with ACL error code {status}")
+
+
+def _acl_status(ret: Any) -> Any:
+    if isinstance(ret, tuple | list) and ret:
+        return ret[-1]
+    return ret
 
 
 def _add_dataset_buffer(acl: Any, dataset: Any, buffer: _DeviceBuffer) -> None:
     data_buffer = acl.create_data_buffer(buffer.ptr, buffer.size)
     ret = acl.mdl.add_dataset_buffer(dataset, data_buffer)
-    if ret != 0:
+    if _acl_status(ret) != 0:
         acl.destroy_data_buffer(data_buffer)
         _check_acl(ret, "acl.mdl.add_dataset_buffer")
 

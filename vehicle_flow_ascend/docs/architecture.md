@@ -40,6 +40,9 @@ VideoSource
 | 几何计算 | `src/vehicle_flow_ascend/counting/geometry.py` | 点在线两侧判断、有限线段穿越判断 |
 | 可视化叠加 | `src/vehicle_flow_ascend/visualization/overlay.py` | 绘制检测框、类别、ID、计数线、计数和 FPS |
 | FPS 统计 | `src/vehicle_flow_ascend/utils/fps.py` | 滑动窗口 FPS 估计 |
+| Web Dashboard | `src/vehicle_flow_ascend/web/dashboard.py` | 提供静态前端、上传接口、任务状态、MJPEG 流和可选 HTTPS 服务 |
+| Web 批处理任务 | `src/vehicle_flow_ascend/web/inference.py` | 管理上传视频推理任务，向前端推送实时标注帧 |
+| Web 摄像头实时任务 | `src/vehicle_flow_ascend/web/realtime.py` | 接收浏览器 JPEG 帧，调用后端推理并返回 MJPEG 标注流 |
 
 ## 3. 车辆类别定义
 
@@ -127,6 +130,15 @@ soc_version: Ascend310B4
 ```yaml
 output_video: runs/pc_demo_output.mp4
 ```
+
+Web Dashboard 提供两条展示路径：
+
+```text
+上传视频 -> 手动拖动穿线 -> 后端批处理 -> MJPEG 过程帧 -> MP4 结果视频
+浏览器摄像头 -> 本地预览拖动穿线 -> 浏览器抽帧上传 -> 后端实时推理 -> MJPEG 标注流
+```
+
+浏览器摄像头路径调用的是访问页面的那台电脑上的摄像头。若 PC 浏览器访问开发板 IP，摄像头 API 必须使用 HTTPS 页面；普通远程 HTTP 页面会被浏览器判定为非安全上下文，`navigator.mediaDevices` 不可用。后端通过 `--web-certfile` 和 `--web-keyfile` 支持自签名证书 HTTPS 服务。
 
 ## 7. 测试策略
 
