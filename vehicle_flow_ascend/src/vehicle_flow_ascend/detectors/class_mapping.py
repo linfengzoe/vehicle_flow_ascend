@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from vehicle_flow_ascend.types import Detection
 
 

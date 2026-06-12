@@ -54,7 +54,7 @@ class LineConfig:
             return cls()
         if isinstance(value, dict):
             return cls(start=_point(value.get("start")), end=_point(value.get("end")))
-        if isinstance(value, list | tuple) and len(value) == 2:
+        if isinstance(value, (list, tuple)) and len(value) == 2:
             return cls(start=_point(value[0]), end=_point(value[1]))
         raise TypeError("line must be a two-point list or mapping with start/end")
 
@@ -148,7 +148,7 @@ def load_config_with_overrides(
 
 
 def _point(value: Any) -> tuple[int, int]:
-    if not isinstance(value, list | tuple) or len(value) != 2:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
         raise TypeError("line point must contain exactly two numbers")
     return int(value[0]), int(value[1])
 

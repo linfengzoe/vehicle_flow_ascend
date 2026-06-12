@@ -44,7 +44,7 @@ const FALLBACK_CLASSES = [
 ];
 
 const FALLBACK_PIPELINE = [
-  '选择上传视频或浏览器摄像头',
+  '上传视频 / 使用浏览器摄像头 / 使用开发板摄像头',
   '后端执行 YOLOv5 推理',
   '车辆跟踪与穿线计数',
   '叠加检测框和统计信息',
@@ -178,7 +178,7 @@ async function requestJson(url, options = {}) {
 }
 
 function rememberButtonLabels() {
-  ['uploadVideoButton', 'analysisStartButton', 'cameraButton', 'stopButton'].forEach((id) => {
+  ['uploadVideoButton', 'analysisStartButton', 'cameraButton', 'devboardCameraButton', 'stopButton'].forEach((id) => {
     const button = byId(id);
     if (button && !button.dataset.label) {
       button.dataset.label = button.textContent.trim();
@@ -190,16 +190,21 @@ function syncControls() {
   const uploadButton = byId('uploadVideoButton');
   const analysisStartButton = byId('analysisStartButton');
   const cameraButton = byId('cameraButton');
+  const devboardCameraButton = byId('devboardCameraButton');
   const stopButton = byId('stopButton');
   const busy = Boolean(state.busyAction);
-  const active = ['batch', 'realtime', 'camera'].includes(state.mode);
+  const active = ['batch', 'realtime', 'camera', 'devboard-camera'].includes(state.mode);
   const cameraPreview = state.mode === 'camera-preview';
   const canAnalyze =
     state.lineEditor.ready && (Boolean(state.uploadedVideo) || cameraPreview);
+  const canDevboardCamera = !active && !busy;
 
   uploadButton.disabled = busy || active || cameraPreview;
   analysisStartButton.disabled = busy || active || !canAnalyze;
   cameraButton.disabled = busy || active || cameraPreview;
+  if (devboardCameraButton) {
+    devboardCameraButton.disabled = busy || active || !canDevboardCamera;
+  }
   stopButton.disabled = busy || (!active && !cameraPreview);
 }
 
@@ -209,6 +214,7 @@ function setBusy(isBusy, action = '') {
     upload: byId('uploadVideoButton'),
     analysis: byId('analysisStartButton'),
     camera: byId('cameraButton'),
+    devboard: byId('devboardCameraButton'),
     stop: byId('stopButton'),
   };
 
@@ -223,6 +229,7 @@ function setBusy(isBusy, action = '') {
     if (action === 'upload') buttons.upload.textContent = '上传中...';
     if (action === 'analysis') buttons.analysis.textContent = '启动中...';
     if (action === 'camera') buttons.camera.textContent = '连接中...';
+    if (action === 'devboard') buttons.devboard.textContent = '连接中...';
     if (action === 'stop') buttons.stop.textContent = '停止中...';
   }
 
@@ -1557,6 +1564,40 @@ async function startCameraAnalysisFlow() {
   }
 }
 
+async function startDevboardCameraFlow() {
+  setError('');
+  nextViewToken();
+  resetResultVideo();
+  resetRealtimeStream();
+  setBusy(true, 'devboard');
+
+  try {
+    const requestPayload = { camera_index: 'auto' };
+    if (state.lineEditor.ready) {
+      requestPayload.line = lineFromEditor();
+    }
+    const started = await requestJson('/api/realtime/start-devboard-camera', {
+      method: 'POST',
+      json: requestPayload,
+    });
+    state.realtimeSessionId = started.session_id;
+
+    setMode('devboard-camera');
+    renderStatus(started);
+    showRealtimeStream(started.session_id);
+    startRealtimePolling();
+  } catch (error) {
+    setMode('idle');
+    setError(error.message);
+    showEmptyState(
+      '开发板摄像头不可用',
+      '无法启动开发板摄像头。请确认摄像头已连接到开发板的 USB 接口，然后重试。',
+    );
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function stopActiveFlow() {
   setError('');
   setBusy(true, 'stop');
@@ -1570,12 +1611,17 @@ async function stopActiveFlow() {
       return;
     }
 
-    if (state.mode === 'camera' || state.mode === 'realtime' || state.realtimeSessionId) {
+    if (state.mode === 'camera' || state.mode === 'devboard-camera' || state.mode === 'realtime' || state.realtimeSessionId) {
       const stopped = await stopRealtimeSession(true);
       if (stopped) {
-        showEmptyState('摄像头已停止', '浏览器摄像头与实时推理会话都已释放。');
+        showEmptyState(
+          state.mode === 'devboard-camera' ? '开发板摄像头已停止' : '摄像头已停止',
+          state.mode === 'devboard-camera'
+            ? '开发板摄像头与实时推理会话都已释放。'
+            : '浏览器摄像头与实时推理会话都已释放。',
+        );
       } else {
-        showEmptyState('摄像头停止请求失败', '后端实时会话可能仍在运行，请再次点击停止或刷新后重试。');
+        showEmptyState('停止请求失败', '后端实时会话可能仍在运行，请再次点击停止或刷新后重试。');
       }
       return;
     }
@@ -1592,7 +1638,7 @@ async function stopActiveFlow() {
   } catch (error) {
     setError(error.message);
   } finally {
-    if (state.mode !== 'camera' && state.mode !== 'realtime') {
+    if (state.mode !== 'camera' && state.mode !== 'devboard-camera' && state.mode !== 'realtime') {
       setBusy(false);
     }
   }
@@ -1623,6 +1669,9 @@ function bindEvents() {
   });
   byId('cameraButton').addEventListener('click', () => {
     startCameraPreviewFlow().catch((error) => setError(error.message));
+  });
+  byId('devboardCameraButton').addEventListener('click', () => {
+    startDevboardCameraFlow().catch((error) => setError(error.message));
   });
   byId('stopButton').addEventListener('click', () => {
     stopActiveFlow().catch((error) => setError(error.message));

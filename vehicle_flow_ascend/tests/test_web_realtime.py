@@ -40,6 +40,17 @@ class BlockingDetector:
         self.released = True
 
 
+class FailingDetector:
+    def __init__(self) -> None:
+        self.released = False
+
+    def detect(self, frame_bgr) -> list[Detection]:
+        raise RuntimeError("acl.rt.memcpy host->device failed with ACL error code 107002")
+
+    def release(self) -> None:
+        self.released = True
+
+
 def jpeg_bytes() -> bytes:
     frame = np.zeros((24, 32, 3), dtype=np.uint8)
     ok, encoded = cv2.imencode(".jpg", frame)
@@ -86,6 +97,34 @@ def test_realtime_manager_applies_line_override_on_start(monkeypatch) -> None:
     assert captured_lines == [[[5, 6], [28, 18]]]
 
 
+def test_realtime_manager_keeps_ascend_model_input_size_for_devboard_camera(monkeypatch) -> None:
+    captured_image_sizes = []
+
+    def fake_create_detector(config):
+        captured_image_sizes.append(config.image_size)
+        return FakeDetector()
+
+    class FakeCapture:
+        def isOpened(self):
+            return True
+
+        def read(self):
+            return True, np.zeros((24, 32, 3), dtype=np.uint8)
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(realtime, "create_detector", fake_create_detector)
+    monkeypatch.setattr(realtime.cv2, "VideoCapture", lambda _index: FakeCapture())
+
+    config = VehicleFlowConfig(backend="ascend_om", image_size=640)
+    manager = RealtimeInferenceManager(config)
+    state = manager.start_devboard_camera("0")
+    manager.stop(state["session_id"])
+
+    assert captured_image_sizes == [640]
+
+
 def test_realtime_manager_uses_optimized_image_size_for_live_fps(monkeypatch) -> None:
     captured_image_sizes = []
 
@@ -100,6 +139,74 @@ def test_realtime_manager_uses_optimized_image_size_for_live_fps(monkeypatch) ->
 
     assert started["status"] == "running"
     assert captured_image_sizes == [320]
+
+
+def test_realtime_manager_auto_selects_readable_devboard_camera(monkeypatch) -> None:
+    frame = np.zeros((24, 32, 3), dtype=np.uint8)
+    opened_indices = []
+
+    class FakeCapture:
+        def __init__(self, index) -> None:
+            self.index = index
+            self.released = False
+            opened_indices.append(index)
+
+        def isOpened(self) -> bool:  # noqa: N802 - OpenCV API
+            return self.index in {0, 1}
+
+        def read(self):
+            if self.index == 1:
+                return True, frame.copy()
+            return False, None
+
+        def release(self) -> None:
+            self.released = True
+
+    monkeypatch.setattr(realtime.cv2, "VideoCapture", FakeCapture)
+    monkeypatch.setattr(realtime, "create_detector", lambda config: FakeDetector())
+    manager = RealtimeInferenceManager(VehicleFlowConfig())
+
+    started = manager.start_devboard_camera(camera_index="auto")
+    output = manager.wait_for_frame(started["session_id"], last_version=0, timeout=1.0)
+    manager.stop(started["session_id"])
+
+    assert opened_indices[:2] == [0, 1]
+    assert started["status"] == "running"
+    assert output is not None
+
+
+def test_devboard_camera_thread_reports_processing_failure(monkeypatch) -> None:
+    frame = np.zeros((24, 32, 3), dtype=np.uint8)
+    detector = FailingDetector()
+
+    class FakeCapture:
+        def __init__(self, _index) -> None:
+            self.released = False
+
+        def isOpened(self) -> bool:  # noqa: N802 - OpenCV API
+            return True
+
+        def read(self):
+            return True, frame.copy()
+
+        def release(self) -> None:
+            self.released = True
+
+    monkeypatch.setattr(realtime.cv2, "VideoCapture", FakeCapture)
+    monkeypatch.setattr(realtime, "create_detector", lambda config: detector)
+    manager = RealtimeInferenceManager(VehicleFlowConfig())
+
+    started = manager.start_devboard_camera(camera_index="auto")
+    for _ in range(100):
+        status = manager.status()
+        if status["status"] == "failed":
+            break
+        time.sleep(0.01)
+
+    assert started["status"] == "running"
+    assert status["status"] == "failed"
+    assert "ACL error code 107002" in status["error"]
+    assert detector.released is True
 
 
 def test_realtime_manager_rejects_duplicate_session(monkeypatch) -> None:

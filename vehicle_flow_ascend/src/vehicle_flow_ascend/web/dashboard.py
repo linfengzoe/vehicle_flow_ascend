@@ -133,6 +133,9 @@ def _make_handler(
             if parsed.path == "/api/realtime/start":
                 self._handle_realtime_start()
                 return
+            if parsed.path == "/api/realtime/start-devboard-camera":
+                self._handle_devboard_camera_start()
+                return
             if parsed.path == "/api/realtime/frame":
                 self._handle_realtime_frame(parsed.query)
                 return
@@ -174,6 +177,19 @@ def _make_handler(
         def _handle_realtime_start(self) -> None:
             try:
                 self._send_json(realtime_manager.start(self._read_json()))
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, status=409)
+            except Exception as exc:  # noqa: BLE001 - surface startup issue to UI
+                self._send_json({"error": str(exc)}, status=400)
+
+        def _handle_devboard_camera_start(self) -> None:
+            try:
+                payload = self._read_json()
+                camera_index = payload.get("camera_index", "auto")
+                self._send_json(realtime_manager.start_devboard_camera(
+                    camera_index=camera_index,
+                    payload=payload,
+                ))
             except RuntimeError as exc:
                 self._send_json({"error": str(exc)}, status=409)
             except Exception as exc:  # noqa: BLE001 - surface startup issue to UI
@@ -339,15 +355,18 @@ def _make_handler(
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
                 self.send_header("Content-Length", str(length))
                 self.end_headers()
-                with path.open("rb") as media_file:
-                    media_file.seek(start)
-                    remaining = length
-                    while remaining > 0:
-                        chunk = media_file.read(min(_MEDIA_CHUNK_BYTES, remaining))
-                        if not chunk:
-                            break
-                        self.wfile.write(chunk)
-                        remaining -= len(chunk)
+                try:
+                    with path.open("rb") as media_file:
+                        media_file.seek(start)
+                        remaining = length
+                        while remaining > 0:
+                            chunk = media_file.read(min(_MEDIA_CHUNK_BYTES, remaining))
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            remaining -= len(chunk)
+                except (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError):
+                    pass
                 return
 
             self.send_response(200)
@@ -355,12 +374,15 @@ def _make_handler(
             self.send_header("Accept-Ranges", "bytes")
             self.send_header("Content-Length", str(size))
             self.end_headers()
-            with path.open("rb") as media_file:
-                while True:
-                    chunk = media_file.read(_MEDIA_CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
+            try:
+                with path.open("rb") as media_file:
+                    while True:
+                        chunk = media_file.read(_MEDIA_CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError):
+                pass
 
     return DashboardRequestHandler
 
@@ -587,7 +609,8 @@ def _dashboard_payload(
         "realtime": realtime_status,
         "input_modes": [
             {"key": "upload", "label": "上传视频"},
-            {"key": "camera", "label": "开启摄像头"},
+            {"key": "camera", "label": "开启浏览器摄像头"},
+            {"key": "devboard_camera", "label": "使用开发板摄像头"},
         ],
         "classes": [
             {"key": "car", "label": "小型车", "accent": "#ffb25d"},
@@ -596,7 +619,7 @@ def _dashboard_payload(
             {"key": "two_wheeler", "label": "两轮车", "accent": "#f0764f"},
         ],
         "pipeline": [
-            "选择上传视频或浏览器摄像头",
+            "上传视频 / 使用浏览器摄像头 / 使用开发板摄像头",
             "后端执行 YOLOv5 推理",
             "车辆跟踪与穿线计数",
             "叠加检测框和统计信息",

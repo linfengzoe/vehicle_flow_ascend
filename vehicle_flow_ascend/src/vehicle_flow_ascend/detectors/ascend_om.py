@@ -20,6 +20,7 @@ _COCO_VEHICLE_CLASS_NAMES = {
     5: "bus",
     7: "truck",
 }
+_ACL_RUNTIME_SESSION: "_AclRuntimeSession | None" = None
 
 
 @dataclass
@@ -33,6 +34,7 @@ class AscendOmDetector(Detector):
     config: VehicleFlowConfig
     device_id: int = 0
     _acl: Any = field(init=False, repr=False)
+    _context: Any = field(default=None, init=False, repr=False)
     _model_id: int | None = field(default=None, init=False)
     _model_desc: Any = field(default=None, init=False, repr=False)
     _input_dataset: Any = field(default=None, init=False, repr=False)
@@ -93,16 +95,22 @@ class AscendOmDetector(Detector):
         if self._model_id is not None:
             acl.mdl.unload(self._model_id)
             self._model_id = None
+        if self._context is not None:
+            _check_acl(acl.rt.destroy_context(self._context), "acl.rt.destroy_context")
+            self._context = None
         acl.rt.reset_device(self.device_id)
-        acl.finalize()
+        _acl_runtime_session().release(acl)
 
     def _init_runtime(self, model_path: Path) -> None:
         if not model_path.exists():
             raise FileNotFoundError(f"OM model not found: {model_path}")
 
         acl = self._acl
-        _check_acl(acl.init(), "acl.init")
+        _acl_runtime_session().acquire(acl)
         _check_acl(acl.rt.set_device(self.device_id), "acl.rt.set_device")
+        context, ret = acl.rt.create_context(self.device_id)
+        _check_acl(ret, "acl.rt.create_context")
+        self._context = context
         model_id, ret = acl.mdl.load_from_file(str(model_path))
         _check_acl(ret, "acl.mdl.load_from_file")
         self._model_id = model_id
@@ -132,6 +140,8 @@ class AscendOmDetector(Detector):
         if self._input_buffer is None or self._model_id is None:
             raise RuntimeError("Ascend model is not initialized")
         acl = self._acl
+        if getattr(self, "_context", None) is not None:
+            _check_acl(acl.rt.set_context(self._context), "acl.rt.set_context")
         input_array = np.ascontiguousarray(model_input.astype(np.float32))
         input_bytes = input_array.nbytes
         if input_bytes > self._input_buffer.size:
@@ -194,6 +204,26 @@ class _DeviceBuffer:
             self.ptr = 0
 
 
+class _AclRuntimeSession:
+    def __init__(self) -> None:
+        self._initialized = False
+
+    def acquire(self, acl: Any) -> None:
+        if not self._initialized:
+            _check_acl(acl.init(), "acl.init")
+            self._initialized = True
+
+    def release(self, acl: Any) -> None:
+        _ = acl
+
+
+def _acl_runtime_session() -> _AclRuntimeSession:
+    global _ACL_RUNTIME_SESSION
+    if _ACL_RUNTIME_SESSION is None:
+        _ACL_RUNTIME_SESSION = _AclRuntimeSession()
+    return _ACL_RUNTIME_SESSION
+
+
 def _import_acl() -> Any:
     try:
         import acl  # type: ignore[import-not-found]
@@ -209,7 +239,7 @@ def _check_acl(ret: Any, operation: str) -> None:
 
 
 def _acl_status(ret: Any) -> Any:
-    if isinstance(ret, tuple | list) and ret:
+    if isinstance(ret, (tuple, list)) and ret:
         return ret[-1]
     return ret
 

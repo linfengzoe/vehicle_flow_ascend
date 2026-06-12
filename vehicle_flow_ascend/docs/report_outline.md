@@ -21,7 +21,7 @@
 
 ### 2.1 功能需求
 
-- 支持本地视频或摄像头输入；
+- 支持本地视频、浏览器摄像头和开发板 USB 摄像头输入；
 - 检测画面中的车辆；
 - 将车辆分为 4 类：
   - 小型车 `car`；
@@ -33,13 +33,16 @@
 - 输出总车流量和分类车流量；
 - 显示 FPS；
 - 保存演示视频；
-- 支持昇腾 OM 模型部署。
+- 保存 H.264 MP4 演示视频并支持浏览器播放；
+- 支持昇腾 OM 模型部署；
+- 支持 HTTPS Web Dashboard 和一键启动脚本。
 
 ### 2.2 非功能需求
 
 - 能够稳定运行 30 到 60 秒演示视频；
 - 测试和配置可复现；
 - PC 端和昇腾端复用同一套跟踪计数逻辑；
+- 开发板 Web 后端能连续启动/停止推理任务；
 - 默认测试不依赖真实模型权重和开发板环境。
 
 ## 3. 数据集与类别映射
@@ -118,7 +121,9 @@
 | 跟踪模块 | 维护车辆 ID 和中心点变化 |
 | 计数模块 | 判断穿线并统计总数和分类数量 |
 | 可视化模块 | 绘制检测框、ID、计数线、FPS 和计数结果 |
-| 部署脚本 | 导出 ONNX，转换 OM，运行板端推理 |
+| Web 模块 | 上传视频推理、浏览器摄像头实时推理、开发板 USB 摄像头实时推理 |
+| 视频输出模块 | 输出 H.264 MP4，支持浏览器播放和 Range 请求 |
+| 部署脚本 | 导出 ONNX，转换 OM，一键启动板端 HTTPS Web 后端 |
 
 ## 6. 实验与结果分析
 
@@ -130,6 +135,7 @@
 |---|---|
 | PC 操作系统 | Windows 11 |
 | Python 版本 | 3.10+ |
+| 开发板 Python 版本 | Python 3.9 |
 | 检测模型 | YOLOv5n |
 | 输入尺寸 | 640x640 |
 | 昇腾设备 | Atlas 200I DK A2 |
@@ -186,7 +192,20 @@ bash scripts/convert_onnx_to_om.sh
 
 ```bash
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
-python -m vehicle_flow_ascend --config configs/ascend_om.yaml
+PYTHONPATH=src:$PYTHONPATH python3 -m vehicle_flow_ascend --config configs/ascend_om.yaml
+```
+
+HTTPS Web 后端推荐使用一键脚本：
+
+```bash
+cd /home/HwHiAiUser/vehicle_flow_ascend_current
+./scripts/start_devboard_web.sh
+```
+
+PC 浏览器访问：
+
+```text
+https://192.168.137.100:8766/
 ```
 
 ### 7.3 部署注意事项
@@ -197,7 +216,11 @@ python -m vehicle_flow_ascend --config configs/ascend_om.yaml
 - 注意 BGR/RGB 转换；
 - 注意 letterbox 坐标还原；
 - NMS 在 CPU 端执行；
-- 先用本地 MP4 验证稳定性，再尝试摄像头。
+- 先用本地 MP4 验证稳定性，再尝试摄像头；
+- 远程访问浏览器摄像头必须使用 HTTPS；
+- 开发板 USB 摄像头建议用 `root` 启动 Web 后端；
+- Web 长进程内 Ascend ACL 只初始化一次，避免连续推理第二次启动时报 `acl.init failed with ACL error code 100002`；
+- 开发板 Python 3.9 环境需要延迟类型注解，源码和测试已覆盖该兼容性。
 
 ## 8. 问题与改进
 
@@ -208,6 +231,7 @@ python -m vehicle_flow_ascend --config configs/ascend_om.yaml
 - 货车和公交有时可能混淆；
 - 夜间、雨天、模糊视频效果下降；
 - 计数线位置对计数准确率影响较大。
+- 开发板摄像头识别效果受摄像头角度、车辆距离、光照和 COCO 预训练模型泛化能力影响。
 
 改进方向：
 
@@ -226,6 +250,7 @@ python -m vehicle_flow_ascend --config configs/ascend_om.yaml
 - PC 端实现了完整实时演示流程；
 - 设计了统一检测器接口，使 PC YOLOv5 后端和昇腾 OM 后端可以复用计数逻辑；
 - 给出了模型导出和昇腾部署流程，满足大作业对边缘端推理演示的要求。
+- 实现了开发板 HTTPS Web 一键启动、浏览器摄像头和开发板 USB 摄像头两类实时输入，增强了现场演示可用性。
 
 ## 10. 附录
 

@@ -7,6 +7,7 @@ Vehicle Flow Ascend 是一个面向《人工智能导论》大作业的车辆大
 - 本地视频上传、视频预览、前端手动拖拽穿线、后台推理和 H.264 结果视频播放；
 - 视频批处理推理中的 MJPEG 标注帧实时展示；
 - 浏览器摄像头设备选择、本地预览手动穿线、准实时帧上传和 MJPEG 标注流展示；
+- 开发板 USB 摄像头直连推理，后端在板端采集摄像头并推送 MJPEG 标注流；
 - 总穿线计数、按小型车/公交客车/货车/两轮车拆分的穿线计数；
 - 任务启动、停止、异常和摄像头权限状态反馈。
 
@@ -108,10 +109,11 @@ python -m vehicle_flow_ascend \
 
 浏览器打开 `https://192.168.137.100:8766/`，首次访问会提示证书风险，选择继续访问后摄像头权限才会出现。
 
-当前支持两种输入方式：
+当前支持三种输入方式：
 
 1. 上传视频文件：浏览器把本地视频上传到后端，后端保存到 `data/web_uploads/`，页面先加载视频预览并显示可拖拽穿线。用户拖动线段或端点后点击“开始分析”，前端会把原始视频坐标系下的穿线坐标提交给后端；
-2. 开启浏览器摄像头：页面会列出浏览器可见的摄像头设备，用户可自动选择或指定设备。前端先打开本地摄像头预览并显示可拖拽穿线，点击“开始分析”后再按帧采集画面并发送给后端，后端按手动穿线完成推理和计数后回传 MJPEG 标注流。
+2. 开启浏览器摄像头：页面会列出浏览器可见的摄像头设备，用户可自动选择或指定设备。前端先打开本地摄像头预览并显示可拖拽穿线，点击“开始分析”后再按帧采集画面并发送给后端，后端按手动穿线完成推理和计数后回传 MJPEG 标注流；
+3. 使用开发板摄像头：网页只发送启动请求，开发板后端直接用 OpenCV 打开板端 USB 摄像头，自动探测可读设备编号，后端在板端完成采集、Ascend OM 推理、跟踪计数和 MJPEG 标注流输出。
 
 视频上传模式的执行路径：
 
@@ -124,8 +126,9 @@ python -m vehicle_flow_ascend \
 
 - 浏览器摄像头 API `navigator.mediaDevices.getUserMedia` 只在安全上下文中可用，例如 `localhost`、`127.0.0.1` 或 HTTPS。若通过普通 HTTP 访问开发板 IP，前端会提示改用 HTTPS 地址；
 - 摄像头模式同样需要先在主屏拖动穿线。前端会把预览分辨率下的穿线坐标映射到实际上传给后端的实时帧坐标，再提交给 `/api/realtime/start`，避免预览线和后端标注线错位；
-- “准实时”表示当前实现由浏览器按帧采集并上传，后端推理后再回传结果显示。实时路径会把摄像头帧压缩到最长边 480，并把实时 YOLO 输入尺寸限制到 320，以优先保证交互帧率。实际 FPS 和延迟仍取决于浏览器采样、网络或本机传输以及后端推理速度，不等同于原始摄像头帧率的实时预览；
+- “准实时”表示当前实现由浏览器按帧采集并上传，后端推理后再回传结果显示。浏览器摄像头路径会把上传帧压缩到最长边 480，并把非昇腾后端实时 YOLO 输入尺寸限制到 320，以优先保证交互帧率；`ascend_om` 后端保持配置中的 OM 模型输入尺寸，默认 `640`，避免开发板推理输入与模型不匹配；
 - 前端会对实时帧上传做降采样和连续失败重试，停止摄像头时会中断正在上传的帧，避免停止请求卡住。
+- 开发板 USB 摄像头模式不依赖浏览器 `getUserMedia`，但需要后端运行用户有摄像头设备权限；课堂环境建议直接用 `root` 启动 Web 后端。
 
 页面会持续展示以下信息：
 
@@ -214,7 +217,7 @@ PYTHONPATH=src:$PYTHONPATH python3 -m vehicle_flow_ascend \
   --output-video runs/smoke_output.mp4
 ```
 
-启动 HTTPS Web 前端：
+首次部署时生成 HTTPS 证书：
 
 ```bash
 mkdir -p certs runs
@@ -224,9 +227,36 @@ openssl req -x509 -nodes -newkey rsa:2048 \
   -days 365 \
   -subj "/CN=192.168.137.100" \
   -addext "subjectAltName=IP:192.168.137.100,DNS:localhost"
+chmod 600 certs/web.key
+```
 
-nohup bash -lc 'cd /home/HwHiAiUser/vehicle_flow_ascend_current && source /usr/local/Ascend/ascend-toolkit/set_env.sh && export PYTHONPATH=src:$PYTHONPATH && exec python3 -m vehicle_flow_ascend --config configs/ascend_om.yaml --web --web-host 0.0.0.0 --web-port 8766 --web-certfile certs/web.crt --web-keyfile certs/web.key' > runs/web-https.log 2>&1 &
-echo $! > runs/web-https.pid
+一键启动 HTTPS Web 后端：
+
+```bash
+cd /home/HwHiAiUser/vehicle_flow_ascend_current
+./scripts/start_devboard_web.sh
+```
+
+如果已经进入 `scripts/` 目录，也必须带 `./`：
+
+```bash
+cd /home/HwHiAiUser/vehicle_flow_ascend_current/scripts
+./start_devboard_web.sh
+```
+
+脚本会自动执行：
+
+- 切换到项目根目录；
+- 加载 `/usr/local/Ascend/ascend-toolkit/set_env.sh`；
+- 设置 `PYTHONPATH=src:${PYTHONPATH:-}` 和 `PYTHONDONTWRITEBYTECODE=1`；
+- 停止同端口旧服务；
+- 后台启动 `python3 -B -m vehicle_flow_ascend --web`；
+- 写入 `runs/web-https.pid` 和 `runs/web-https.log`。
+
+可通过环境变量覆盖默认值：
+
+```bash
+WEB_PORT=8899 CONFIG_PATH=configs/ascend_om.yaml ./scripts/start_devboard_web.sh
 ```
 
 访问：
@@ -240,3 +270,5 @@ https://192.168.137.100:8766/
 ```bash
 kill $(cat runs/web-https.pid)
 ```
+
+开发板 Web 后端当前按 Python 3.9 运行环境兼容；Ascend ACL 在同一 Web 进程内只初始化一次，连续启动/停止视频推理或开发板摄像头推理不会重复 `acl.init`/`acl.finalize` 导致第二次启动失败。

@@ -18,12 +18,15 @@ DEFAULT_IDLE_TIMEOUT_SECONDS = 10.0
 _IDLE_EXPIRED_ERROR = "realtime session expired after idle timeout"
 _REAPER_MAX_SLEEP_SECONDS = 0.25
 _REALTIME_IMAGE_SIZE = 320
+_DEVBOARD_CAMERA_PROBE_INDICES = tuple(range(6))
+_CAMERA_READ_PROBE_ATTEMPTS = 5
 
 
 @dataclass
 class RealtimeState:
     status: str = "idle"
     session_id: str | None = None
+    source: int | None = None
     started_at: float | None = None
     stopped_at: float | None = None
     frames: int = 0
@@ -38,6 +41,7 @@ class RealtimeState:
         return {
             "status": self.status,
             "session_id": self.session_id,
+            "source": self.source,
             "started_at": self.started_at,
             "stopped_at": self.stopped_at,
             "frames": self.frames,
@@ -68,6 +72,9 @@ class RealtimeInferenceManager:
         self._inflight_frames = 0
         self._release_after_inflight = False
         self._reaper_thread: threading.Thread | None = None
+        self._capture: cv2.VideoCapture | None = None
+        self._capture_thread: threading.Thread | None = None
+        self._capture_stop_event = threading.Event()
 
     def start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         with self._condition:
@@ -80,7 +87,7 @@ class RealtimeInferenceManager:
             session_config = replace(
                 self._base_config,
                 line=_line_from_payload(payload or {}, self._base_config.line),
-                image_size=min(self._base_config.image_size, _REALTIME_IMAGE_SIZE),
+                image_size=_realtime_image_size(self._base_config),
             )
             detector = create_detector(session_config)
             self._detector = detector
@@ -99,6 +106,102 @@ class RealtimeInferenceManager:
             self._ensure_reaper_locked()
             self._condition.notify_all()
             return self._state.to_dict()
+
+    def start_devboard_camera(
+        self,
+        camera_index: int | str = "auto",
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with self._condition:
+            self._expire_idle_session_locked()
+            if self._state.status == "running":
+                raise RuntimeError("realtime inference session is already running")
+            if self._inflight_frames:
+                raise RuntimeError("realtime inference session is still stopping")
+
+            capture, selected_index = _open_devboard_camera(camera_index)
+
+            session_config = replace(
+                self._base_config,
+                line=_line_from_payload(payload or {}, self._base_config.line),
+                image_size=_realtime_image_size(self._base_config),
+            )
+            try:
+                detector = create_detector(session_config)
+            except Exception:
+                capture.release()
+                raise
+            self._detector = detector
+            self._processor = FrameProcessor(session_config, detector)
+            self._capture = capture
+            self._latest_jpeg = None
+            self._last_activity_at = time.monotonic()
+            self._release_after_inflight = False
+            self._capture_stop_event.clear()
+            now = time.time()
+            self._state = RealtimeState(
+                status="running",
+                session_id=uuid.uuid4().hex[:10],
+                started_at=now,
+                counts={"total": 0},
+                updated_at=now,
+            )
+            self._state.source = selected_index
+            self._ensure_reaper_locked()
+            self._capture_thread = threading.Thread(
+                target=self._devboard_capture_loop,
+                name="vehicle-flow-devboard-capture",
+                daemon=True,
+            )
+            self._capture_thread.start()
+            self._condition.notify_all()
+            return self._state.to_dict()
+
+    def _devboard_capture_loop(self) -> None:
+        while not self._capture_stop_event.is_set():
+            if self._capture is None:
+                break
+            ok, frame_bgr = self._capture.read()
+            if not ok:
+                time.sleep(0.05)
+                continue
+
+            with self._condition:
+                if self._state.status != "running":
+                    break
+                if self._processor is None:
+                    break
+                processor = self._processor
+                self._inflight_frames += 1
+
+            processed = None
+            output_jpeg = None
+            error = None
+            try:
+                processed = processor.process(frame_bgr)
+                output_jpeg = _encode_jpeg(processed.annotated_frame)
+            except Exception as exc:  # noqa: BLE001 - publish worker errors to the UI
+                error = exc
+
+            with self._condition:
+                self._inflight_frames -= 1
+                if error is not None:
+                    if self._state.status == "running" and self._processor is processor:
+                        self._fail_running_session_locked(str(error))
+                    if self._inflight_frames == 0:
+                        self._release_resources_locked()
+                    self._condition.notify_all()
+                    break
+                if (
+                    processed is not None
+                    and output_jpeg is not None
+                    and self._state.status == "running"
+                    and self._processor is processor
+                ):
+                    self._apply_processed_frame_locked(processed, output_jpeg)
+                if self._release_after_inflight and self._inflight_frames == 0:
+                    self._release_resources_locked()
+                self._condition.notify_all()
 
     def process_jpeg_frame(self, session_id: str, jpeg_bytes: bytes) -> dict[str, Any]:
         frame_bgr = _decode_jpeg(jpeg_bytes)
@@ -142,6 +245,13 @@ class RealtimeInferenceManager:
         self._state.frame_version += 1
         self._state.updated_at = now
         self._state.last_frame_at = now
+
+    def _fail_running_session_locked(self, error: str) -> None:
+        now = time.time()
+        self._state.status = "failed"
+        self._state.error = error
+        self._state.stopped_at = now
+        self._state.updated_at = now
 
     def status(self) -> dict[str, Any]:
         with self._condition:
@@ -261,6 +371,11 @@ class RealtimeInferenceManager:
         self._latest_jpeg = None
         self._last_activity_at = None
         self._release_after_inflight = False
+        self._capture_stop_event.set()
+        capture = self._capture
+        self._capture = None
+        if capture is not None:
+            capture.release()
         release = getattr(detector, "release", None)
         if callable(release):
             release()
@@ -285,6 +400,42 @@ def _encode_jpeg(frame_bgr) -> bytes:
     if not ok:
         raise ValueError("failed to encode jpeg frame")
     return encoded.tobytes()
+
+
+def _open_devboard_camera(camera_index: int | str) -> tuple[cv2.VideoCapture, int]:
+    indices = _camera_probe_indices(camera_index)
+    attempted = []
+    for index in indices:
+        attempted.append(str(index))
+        capture = cv2.VideoCapture(index)
+        if capture.isOpened() and _camera_can_read(capture):
+            return capture, index
+        capture.release()
+    raise RuntimeError(f"开发板摄像头不可用 (tried indices: {', '.join(attempted)})")
+
+
+def _camera_probe_indices(camera_index: int | str) -> tuple[int, ...]:
+    if isinstance(camera_index, str):
+        value = camera_index.strip().lower()
+        if value in {"", "auto"}:
+            return _DEVBOARD_CAMERA_PROBE_INDICES
+        return (int(value),)
+    return (int(camera_index),)
+
+
+def _camera_can_read(capture: cv2.VideoCapture) -> bool:
+    for _ in range(_CAMERA_READ_PROBE_ATTEMPTS):
+        ok, frame = capture.read()
+        if ok and frame is not None:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _realtime_image_size(config: VehicleFlowConfig) -> int:
+    if config.backend == "ascend_om":
+        return config.image_size
+    return min(config.image_size, _REALTIME_IMAGE_SIZE)
 
 
 def _line_from_payload(payload: dict[str, Any], default_line: LineConfig) -> LineConfig:

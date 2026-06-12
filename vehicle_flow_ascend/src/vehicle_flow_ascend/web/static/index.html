@@ -32,7 +32,7 @@
         <p class="kicker">实时检测 / 穿线计数 / 标注回放</p>
         <h1>把道路视频整理成可回放的车辆档案</h1>
         <p>
-          前端只保留两个入口：上传本地视频，或调用浏览器摄像头。后端完成车辆检测、质心跟踪、穿线统计与标注输出。
+          前端保留三个入口：上传本地视频、调用浏览器摄像头，或直接使用开发板摄像头。后端完成车辆检测、质心跟踪、穿线统计与标注输出。
         </p>
       </div>
 
@@ -127,7 +127,8 @@
         <div class="action-stack">
           <button class="secondary-button" id="uploadVideoButton" type="button">上传视频并预览</button>
           <button class="primary-button" id="analysisStartButton" type="button">开始分析</button>
-          <button class="secondary-button" id="cameraButton" type="button">开启摄像头</button>
+          <button class="secondary-button" id="cameraButton" type="button">开启浏览器摄像头</button>
+          <button class="secondary-button" id="devboardCameraButton" type="button">使用开发板摄像头</button>
         </div>
       </aside>
 

@@ -66,7 +66,7 @@ def _extract_xyxy_rows(results: Any) -> list[list[float]]:
 def _normalize_names(names: Any) -> dict[int, str]:
     if isinstance(names, dict):
         return {int(key): str(value) for key, value in names.items()}
-    if isinstance(names, list | tuple):
+    if isinstance(names, (list, tuple)):
         return {index: str(value) for index, value in enumerate(names)}
     return {}
 

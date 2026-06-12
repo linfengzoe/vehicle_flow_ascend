@@ -42,7 +42,8 @@ VideoSource
 | FPS 统计 | `src/vehicle_flow_ascend/utils/fps.py` | 滑动窗口 FPS 估计 |
 | Web Dashboard | `src/vehicle_flow_ascend/web/dashboard.py` | 提供静态前端、上传接口、任务状态、MJPEG 流和可选 HTTPS 服务 |
 | Web 批处理任务 | `src/vehicle_flow_ascend/web/inference.py` | 管理上传视频推理任务，向前端推送实时标注帧 |
-| Web 摄像头实时任务 | `src/vehicle_flow_ascend/web/realtime.py` | 接收浏览器 JPEG 帧，调用后端推理并返回 MJPEG 标注流 |
+| Web 实时任务 | `src/vehicle_flow_ascend/web/realtime.py` | 接收浏览器 JPEG 帧或采集开发板 USB 摄像头，调用后端推理并返回 MJPEG 标注流 |
+| 开发板一键启动脚本 | `scripts/start_devboard_web.sh` | 加载 CANN 环境，设置 `PYTHONPATH`，停止旧服务并后台启动 HTTPS Web 后端 |
 
 ## 3. 车辆类别定义
 
@@ -96,6 +97,13 @@ model_path: models/yolov5n.om
 soc_version: Ascend310B4
 ```
 
+Web 后端是长进程。为支持连续启动/停止上传视频推理、浏览器摄像头推理和开发板 USB 摄像头推理，`ascend_om`
+在进程内只初始化一次 ACL runtime；每个任务结束时释放模型、数据集、device buffer、context 和 device，但不反复
+`acl.finalize()`，避免第二次任务出现 `acl.init failed with ACL error code 100002`。
+
+开发板环境当前按 Python 3.9 兼容处理：源码中使用 `|` 类型注解的文件启用延迟注解，运行时 `isinstance()`
+类型组使用 `(list, tuple)` 这类 Python 3.9 可执行写法。
+
 ## 5. 计数算法
 
 系统使用轻量级质心跟踪和单线穿越判断：
@@ -131,14 +139,23 @@ soc_version: Ascend310B4
 output_video: runs/pc_demo_output.mp4
 ```
 
-Web Dashboard 提供两条展示路径：
+Web Dashboard 提供三条展示路径：
 
 ```text
 上传视频 -> 手动拖动穿线 -> 后端批处理 -> MJPEG 过程帧 -> MP4 结果视频
 浏览器摄像头 -> 本地预览拖动穿线 -> 浏览器抽帧上传 -> 后端实时推理 -> MJPEG 标注流
+开发板摄像头 -> 后端自动探测 USB 摄像头 -> 板端采集 -> Ascend OM 实时推理 -> MJPEG 标注流
 ```
 
 浏览器摄像头路径调用的是访问页面的那台电脑上的摄像头。若 PC 浏览器访问开发板 IP，摄像头 API 必须使用 HTTPS 页面；普通远程 HTTP 页面会被浏览器判定为非安全上下文，`navigator.mediaDevices` 不可用。后端通过 `--web-certfile` 和 `--web-keyfile` 支持自签名证书 HTTPS 服务。
+
+开发板摄像头路径不依赖浏览器摄像头 API，而是通过 `/api/realtime/start-devboard-camera`
+让板端后端直接打开 USB 摄像头。该路径会自动尝试设备编号 `0..5`，需要运行用户具备摄像头设备权限；课程开发板演示通常使用
+`root` 启动 Web 后端。为了保持 Ascend OM 模型输入正确，`ascend_om` 实时路径保持配置中的 `image_size`
+默认 `640`；非昇腾实时路径仍可降到 `320` 以提升交互帧率。
+
+输出 MP4 使用 H.264 编码，优先使用 `imageio-ffmpeg`，缺失时回退系统 `ffmpeg`。后端 `/media/output-video`
+支持 HTTP Range 请求，便于浏览器对结果 MP4 进行 seek 和播放。
 
 ## 7. 测试策略
 
@@ -146,7 +163,8 @@ Web Dashboard 提供两条展示路径：
 
 1. **纯逻辑单元测试**：类别映射、几何计算、计数器、质心跟踪；
 2. **流水线测试**：用合成帧和假检测器测试端到端计数；
-3. **部署辅助测试**：确保 Ascend 后端在 PC 上懒加载并给出明确错误。
+3. **部署辅助测试**：确保 Ascend 后端在 PC 上懒加载并给出明确错误；
+4. **兼容性测试**：检查 Python 3.9 类型注解兼容、开发板启动脚本约定、H.264 输出和 HTTP Range 播放。
 
 运行方式：
 
@@ -161,7 +179,8 @@ python -m pytest .\tests -q
 - 质心跟踪适合简单场景，遮挡严重时可能发生 ID 切换；
 - 单线计数对计数线位置敏感，需要根据视频视角调整；
 - 默认 COCO 预训练权重没有针对本地道路场景微调；
-- 昇腾 OM 推理需要开发板实际验证 FPS 和模型输出形状。
+- 昇腾 OM 推理需要开发板实际验证 FPS、模型输出形状和摄像头视角；
+- 开发板摄像头检测效果受光照、车辆距离、摄像头安装角度和 COCO 预训练模型泛化能力影响。
 
 ## 9. 可扩展方向
 

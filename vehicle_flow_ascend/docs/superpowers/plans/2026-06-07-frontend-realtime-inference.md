@@ -2,6 +2,19 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## 当前实现更新说明
+
+截至 2026-06-12，实际实现已在本计划的“上传视频 + 浏览器摄像头”基础上继续扩展：
+
+- 新增开发板 USB 摄像头入口，接口为 `POST /api/realtime/start-devboard-camera`；
+- 上传视频结果使用 H.264 MP4，`/media/output-video` 支持 HTTP Range，便于浏览器播放；
+- 新增 `scripts/start_devboard_web.sh`，用于开发板 HTTPS Web 后端一键启动；
+- `ascend_om` 保持 OM 模型配置输入尺寸，默认 `640`，避免实时开发板摄像头推理输入不匹配；
+- Web 进程内 ACL runtime 只初始化一次，避免连续第二次推理出现 `acl.init failed with ACL error code 100002`；
+- 源码已补充 Python 3.9 类型注解兼容测试。
+
+以下任务清单保留为 2026-06-07 原始执行计划记录。
+
 **Goal:** 重构 Web Dashboard：后端复用现有车辆检测/跟踪/计数/叠加逻辑，前端只保留上传视频与浏览器摄像头入口，并展示后台推理后的结果视频或准实时标注画面。
 
 **Architecture:** 抽出 `FrameProcessor` 作为单帧推理单元，让 CLI/上传视频后台任务/浏览器摄像头实时会话共用同一套后端处理逻辑。上传视频继续走现有 `InferenceTaskManager`；浏览器摄像头新增 `RealtimeInferenceManager`，前端用 `getUserMedia()` 抽帧 POST 到后端，结果区域通过 MJPEG 流显示标注帧。
@@ -1670,10 +1683,11 @@ http://127.0.0.1:8765
 python -m vehicle_flow_ascend --config configs/pc_demo.yaml --web --web-host 0.0.0.0 --web-port 8899
 ```
 
-前端提供两种输入方式：
+前端当前提供三种输入方式：
 
 1. **上传视频文件**：选择本地交通视频，后端保存到 `data/web_uploads/`，随后后台调用现有推理流水线生成标注后结果视频，页面完成后播放结果视频。
 2. **开启浏览器摄像头**：浏览器请求摄像头权限，前端按固定帧率抽帧发送给后端，后端执行车辆检测、跟踪、计数和画面叠加，页面显示后端返回的准实时标注画面。
+3. **使用开发板摄像头**：网页请求后端启动板端摄像头，开发板直接采集 USB 摄像头画面并执行 Ascend OM 推理，页面显示 MJPEG 标注流。
 
 页面展示内容：
 

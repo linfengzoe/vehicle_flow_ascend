@@ -63,10 +63,11 @@ def test_dashboard_payload_exposes_presentation_not_parameter_panel() -> None:
     ]
     assert payload["input_modes"] == [
         {"key": "upload", "label": "上传视频"},
-        {"key": "camera", "label": "开启摄像头"},
+        {"key": "camera", "label": "开启浏览器摄像头"},
+        {"key": "devboard_camera", "label": "使用开发板摄像头"},
     ]
     assert payload["pipeline"] == [
-        "选择上传视频或浏览器摄像头",
+        "上传视频 / 使用浏览器摄像头 / 使用开发板摄像头",
         "后端执行 YOLOv5 推理",
         "车辆跟踪与穿线计数",
         "叠加检测框和统计信息",
@@ -102,6 +103,7 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "particleVehicleCanvas" in index_html
     assert "videoFileInput" in index_html
     assert "cameraButton" in index_html
+    assert "devboardCameraButton" in index_html
     assert "cameraDeviceSelect" in index_html
     assert "realtimeStream" in index_html
     assert "cameraPreview" in index_html
@@ -118,6 +120,7 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "/api/inference/start" in app_js
     assert "/api/inference/upload" in app_js
     assert "/api/realtime/start" in app_js
+    assert "/api/realtime/start-devboard-camera" in app_js
     assert "/api/realtime/frame" in app_js
     assert "/api/realtime/stream" in app_js
     assert "AbortController" in app_js
@@ -140,6 +143,8 @@ def test_dashboard_static_assets_match_realtime_frontend() -> None:
     assert "showInferenceStream" in app_js
     assert "startCameraPreviewFlow" in app_js
     assert "startCameraAnalysisFlow" in app_js
+    assert "startDevboardCameraFlow" in app_js
+    assert "camera_index: 'auto'" in app_js
     assert "camera-preview" in app_js
     assert "/api/inference/stream" in app_js
     assert "line: lineFromEditor()" in app_js

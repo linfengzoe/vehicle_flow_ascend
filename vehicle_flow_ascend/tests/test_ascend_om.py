@@ -9,6 +9,7 @@ from vehicle_flow_ascend.detectors.ascend_om import (
     _add_dataset_buffer,
     _ASCEND_RUNTIME_ERROR,
     _DeviceBuffer,
+    _AclRuntimeSession,
 )
 from vehicle_flow_ascend.detectors.base import create_detector
 
@@ -99,3 +100,74 @@ def test_infer_copies_input_array_pointer_to_device() -> None:
 
     src_arg = detector._acl.rt.memcpy_calls[0][2]
     assert isinstance(src_arg, int)
+
+
+def test_infer_sets_explicit_acl_context_before_threaded_work() -> None:
+    class FakeRt:
+        ACL_MEMCPY_HOST_TO_DEVICE = 1
+
+        def __init__(self) -> None:
+            self.context_calls = []
+
+        def set_context(self, context):
+            self.context_calls.append(context)
+            return 0
+
+        def memcpy(self, _dst, _dst_size, _src, _src_size, _kind):
+            return 0
+
+    class FakeMdl:
+        def execute(self, _model_id, _input_dataset, _output_dataset):
+            return 0
+
+    class FakeAcl:
+        def __init__(self) -> None:
+            self.rt = FakeRt()
+            self.mdl = FakeMdl()
+
+    detector = object.__new__(AscendOmDetector)
+    detector._acl = FakeAcl()
+    detector._context = 999
+    detector._input_buffer = _DeviceBuffer(ptr=123, size=16)
+    detector._model_id = 1
+    detector._input_dataset = object()
+    detector._output_dataset = object()
+    detector._output_buffers = [_DeviceBuffer(ptr=456, size=4)]
+    detector._copy_output_to_host = lambda _buffer: np.array([0], dtype=np.float32)
+
+    detector._infer(np.zeros((1, 1, 1, 4), dtype=np.float32))
+
+    assert detector._acl.rt.context_calls == [999]
+
+
+def test_acl_runtime_session_keeps_acl_initialized_for_web_process_reuse() -> None:
+    class FakeAcl:
+        def __init__(self) -> None:
+            self.init_calls = 0
+            self.finalize_calls = 0
+
+        def init(self):
+            self.init_calls += 1
+            return 0
+
+        def finalize(self):
+            self.finalize_calls += 1
+            return 0
+
+    acl = FakeAcl()
+    session = _AclRuntimeSession()
+
+    session.acquire(acl)
+    session.acquire(acl)
+    session.release(acl)
+
+    assert acl.init_calls == 1
+    assert acl.finalize_calls == 0
+
+    session.release(acl)
+
+    assert acl.finalize_calls == 0
+
+    session.acquire(acl)
+
+    assert acl.init_calls == 1
